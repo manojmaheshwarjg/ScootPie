@@ -24,6 +24,7 @@ export default function SwipePage() {
   const [tryOnImages, setTryOnImages] = useState<Map<string, string>>(new Map());
   const [generatingTryOns, setGeneratingTryOns] = useState<Set<string>>(new Set());
   const [hasPhoto, setHasPhoto] = useState(true);
+  const [query, setQuery] = useState('');
   
   const {
     sessionId,
@@ -68,17 +69,46 @@ export default function SwipePage() {
     setGeneratingTryOns(prev => new Set(prev).add(productId));
 
     try {
-      const response = await fetch('/api/tryon/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId }),
-      });
+      const product = products.find(p => p.id === productId);
+      if (!product) return;
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.imageUrl) {
-          setTryOnImages(prev => new Map(prev).set(productId, data.imageUrl));
+      let imageUrl: string | undefined;
+
+      if (product.isExternal) {
+        // Direct generation using image URL and user photo
+        const response = await fetch('/api/tryon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userPhotoUrl,
+            productImageUrl: product.imageUrl,
+            productName: product.name,
+            productDescription: product.description,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && (data.imageUrl || data.imageData)) {
+            imageUrl = data.imageUrl || `data:image/png;base64,${data.imageData}`;
+          }
         }
+      } else {
+        // Use cached/DB-based generation
+        const response = await fetch('/api/tryon/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.imageUrl) {
+            imageUrl = data.imageUrl;
+          }
+        }
+      }
+
+      if (imageUrl) {
+        setTryOnImages(prev => new Map(prev).set(productId, imageUrl!));
       }
     } catch (error) {
       console.error(`Failed to generate try-on for product ${productId}:`, error);
@@ -89,7 +119,7 @@ export default function SwipePage() {
         return next;
       });
     }
-  }, [userPhotoUrl, tryOnImages, generatingTryOns]);
+  }, [userPhotoUrl, tryOnImages, generatingTryOns, products]);
 
   // Pre-generate try-ons for upcoming products
   const pregenerateTryOns = useCallback(async (products: Product[], startIndex: number) => {
@@ -125,13 +155,19 @@ export default function SwipePage() {
     }
   }, [currentIndex, products, userPhotoUrl, pregenerateTryOns]);
 
-  const loadProducts = async () => {
+  const loadProducts = async (search?: string) => {
     setLoading(true);
     try {
-      const response = await fetch('/api/products?count=15');
+      const url = search && search.trim().length > 0
+        ? `/api/search/products?q=${encodeURIComponent(search.trim())}&count=15`
+        : '/api/products?count=15';
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setProducts(data.products);
+        setCurrentIndex(0);
+        setTryOnImages(new Map());
+        setGeneratingTryOns(new Set());
       }
     } catch (error) {
       console.error('Failed to load products:', error);
@@ -239,23 +275,67 @@ export default function SwipePage() {
     <div className="flex flex-col h-screen bg-[#FAFAFA] pb-16 lg:pb-0 lg:pl-72">
       {/* Desktop Header */}
       <div className="hidden lg:flex items-center justify-between px-6 py-6">
-        <div>
+        <div className="flex-1 pr-6">
           <h1 className="text-2xl font-bold text-[#1A1A1A] mb-1">Discover Fashion</h1>
           <p className="text-sm text-[#6B6B6B]">Swipe to find your style</p>
         </div>
-        <div className="rounded-lg bg-white border border-[#E5E5E5] px-4 py-2 text-sm font-medium text-[#1A1A1A]">
+        <div className="flex items-center gap-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              loadProducts(query);
+            }}
+            className="flex items-center gap-2"
+          >
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search products (e.g., red jacket)"
+              className="border border-[#E5E5E5] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A1A1A]"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-[#1A1A1A] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#2A2A2A] transition-colors"
+            >
+              Search
+            </button>
+          </form>
+          <div className="rounded-lg bg-white border border-[#E5E5E5] px-4 py-2 text-sm font-medium text-[#1A1A1A]">
             {remainingCards} cards remaining
+          </div>
         </div>
       </div>
 
       {/* Mobile Header */}
-      <div className="lg:hidden flex items-center justify-between px-4 py-4">
-        <h1 className="text-xl font-bold text-[#1A1A1A]">
-          Discover
-        </h1>
-        <div className="rounded-lg bg-white border border-[#E5E5E5] px-3 py-1.5 text-xs font-medium text-[#1A1A1A]">
-          {remainingCards} left
+      <div className="lg:hidden px-4 py-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-[#1A1A1A]">Discover</h1>
+          <div className="rounded-lg bg-white border border-[#E5E5E5] px-3 py-1.5 text-xs font-medium text-[#1A1A1A]">
+            {remainingCards} left
+          </div>
         </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            loadProducts(query);
+          }}
+          className="flex items-center gap-2"
+        >
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search products"
+            className="flex-1 border border-[#E5E5E5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A1A1A]"
+          />
+          <button
+            type="submit"
+            className="rounded-lg bg-[#1A1A1A] px-3 py-2 text-xs font-medium text-white hover:bg-[#2A2A2A] transition-colors"
+          >
+            Go
+          </button>
+        </form>
       </div>
 
       <div className="flex-1 relative px-4 py-8 lg:max-w-xl lg:mx-auto w-full">
@@ -285,7 +365,7 @@ export default function SwipePage() {
             <h2 className="text-xl font-bold text-[#1A1A1A] mb-2">No more cards!</h2>
             <p className="text-[#6B6B6B] mb-6">You've seen all available items</p>
             <button 
-              onClick={loadProducts} 
+              onClick={() => loadProducts(query)} 
               className="rounded-lg bg-[#1A1A1A] px-6 py-3 text-sm font-medium text-white hover:bg-[#2A2A2A] transition-colors"
             >
               Load More

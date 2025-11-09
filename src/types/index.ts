@@ -17,6 +17,8 @@ export interface Product {
   trending?: boolean;
   isNew?: boolean;
   isEditorial?: boolean;
+  // If true, the product came from an external search (e.g., SerpAPI) rather than our DB
+  isExternal?: boolean;
 }
 
 export interface User {

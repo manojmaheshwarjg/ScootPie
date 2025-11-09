@@ -6,7 +6,7 @@ import { eq, and } from 'drizzle-orm';
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { collectionId: string; itemId: string } }
+  context: { params: Promise<{ collectionId: string; itemId: string }> }
 ) {
   try {
     const { userId } = await auth();
@@ -15,7 +15,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { collectionId, itemId } = params;
+    const { collectionId, itemId } = await context.params;
 
     // Get user from database
     const user = await db.query.users.findFirst({
@@ -23,7 +23,8 @@ export async function DELETE(
     });
 
     if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });\n    }
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
 
     // Verify collection belongs to user
     const collection = await db.query.collections.findFirst({

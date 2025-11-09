@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/lib/db';
-import { users, photos } from '@/lib/db/schema';
+import { users, photos, tryOnCache } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export async function DELETE(
@@ -52,7 +52,7 @@ export async function DELETE(
     }
 
     // Verify the target photo belongs to this user (let the DB validate UUID syntax)
-    let target: { id: string; isPrimary: boolean } | null = null;
+    let target;
     try {
       target = await db.query.photos.findFirst({
         where: and(eq(photos.id, normalizedId), eq(photos.userId, user.id)),
@@ -161,6 +161,9 @@ export async function PUT(
       .returning();
 
     if (updated.length === 0) return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
+
+    // Invalidate any cached try-on images tied to this photo so new generations use the replaced image
+    await db.delete(tryOnCache).where(and(eq(tryOnCache.userId, dbUser.id), eq(tryOnCache.photoId, photoId)));
 
     return NextResponse.json({ success: true, photo: updated[0] });
   } catch (error) {
