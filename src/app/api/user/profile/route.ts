@@ -40,7 +40,13 @@ export async function POST(req: NextRequest) {
       console.log('[PROFILE API] Existing preferences:', JSON.stringify(existingUser.preferences, null, 2));
       
       // Clean preferences: remove empty strings and undefined values
-      const cleanPreferences = preferences ? {
+      type CleanPreferences = {
+        gender?: string;
+        sizes?: { top?: string; bottom?: string; shoes?: string };
+        budgetRange?: [number, number];
+      };
+      
+      const cleanPreferences: CleanPreferences = preferences ? {
         ...(preferences.gender && preferences.gender.trim() !== '' ? { gender: preferences.gender.trim() } : {}),
         sizes: preferences.sizes ? {
           ...(preferences.sizes.top && preferences.sizes.top.trim() !== '' ? { top: preferences.sizes.top.trim() } : {}),
@@ -105,7 +111,13 @@ export async function POST(req: NextRequest) {
       console.log('[PROFILE API] Creating new user with preferences:', JSON.stringify(preferences, null, 2));
       
       // Clean preferences: remove empty strings and undefined values
-      const cleanPreferences = preferences ? {
+      type CleanPreferences = {
+        gender?: string;
+        sizes?: { top?: string; bottom?: string; shoes?: string };
+        budgetRange?: [number, number];
+      };
+      
+      const cleanPreferences: CleanPreferences = preferences ? {
         ...(preferences.gender && preferences.gender.trim() !== '' ? { gender: preferences.gender.trim() } : {}),
         sizes: preferences.sizes ? {
           ...(preferences.sizes.top && preferences.sizes.top.trim() !== '' ? { top: preferences.sizes.top.trim() } : {}),
