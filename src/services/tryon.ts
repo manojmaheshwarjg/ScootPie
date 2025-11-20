@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
+import { stylistLog, stylistWarn, stylistError } from './utils/stylistLogger';
 
 // Lazy initialization function - ensures ai is created with proper env vars
 function getGeminiAI(): GoogleGenAI {
@@ -23,6 +24,7 @@ export interface TryOnRequest {
   productDescription?: string;
   // Optional flags for future variations (different prompt styles, etc.)
   promptVersion?: number;
+  decisionContext?: string;
 }
 
 export interface TryOnResult {
@@ -257,10 +259,394 @@ export async function generateVirtualTryOn(
     }
     
     const promptVersion = request.promptVersion ?? 1;
+    
+    // Build context-aware prompt based on decision context (which may include outfit analysis)
+    let outfitContextSection = '';
+    let integrationInstructions = '';
+    let itemsToRemove: string[] = [];
+    let isReplacement = false;
+    
+    // Detect if new item is a bottom item (needed for zone-based replacement detection)
+    const newItemIsBottom = request.productName.toLowerCase().includes('short') ||
+                           request.productName.toLowerCase().includes('pant') ||
+                           request.productName.toLowerCase().includes('jean') ||
+                           request.productName.toLowerCase().includes('skirt') ||
+                           request.productName.toLowerCase().includes('trouser') ||
+                           (request.productDescription || '').toLowerCase().includes('bottom');
+    
+    // Check if decision context mentions bottom zone (for zone-based detection)
+    let hasBottomZone = false;
+    
+    if (request.decisionContext) {
+      // Try to parse structured outfit context from decision context
+      const context = request.decisionContext;
+      
+      // Extract items to remove from decision context (from chat flow)
+      // Handle multiple formats:
+      // 1. "itemsToRemove: [item1, item2]" (explicit line)
+      // 2. "- itemsToRemove: [item1, item2]" (formatted with dash)
+      // 3. "itemsToRemove: item1, item2" (array format from formatObject)
+      let itemsToRemoveMatch = context.match(/itemsToRemove:\s*\[([^\]]+)\]/);
+      if (!itemsToRemoveMatch) {
+        itemsToRemoveMatch = context.match(/-?\s*itemsToRemove:\s*\[([^\]]+)\]/);
+      }
+      if (!itemsToRemoveMatch) {
+        // Try to find itemsToRemove line and parse array format
+        const itemsLine = context.match(/-?\s*itemsToRemove:\s*([^\n]+)/);
+        if (itemsLine) {
+          const itemsStr = itemsLine[1].trim();
+          // Try to extract from array-like format
+          const arrayMatch = itemsStr.match(/\[([^\]]+)\]/);
+          if (arrayMatch) {
+            itemsToRemoveMatch = arrayMatch;
+          } else {
+            // Fallback: treat as comma-separated list
+            itemsToRemove = itemsStr.split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean);
+          }
+        }
+      }
+      
+      if (itemsToRemoveMatch) {
+        itemsToRemove = itemsToRemoveMatch[1].split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean);
+        if (itemsToRemove.length > 0) {
+          isReplacement = true;
+          stylistLog('TryOn', `===== DETECTED ITEMS TO REMOVE =====`);
+          stylistLog('TryOn', `Items: ${itemsToRemove.join(', ')}`);
+          stylistLog('TryOn', `Match: ${itemsToRemoveMatch[0]}`);
+        }
+      } else {
+        stylistLog('TryOn', '===== NO ITEMS TO REMOVE DETECTED =====');
+        stylistLog('TryOn', 'Decision context preview:', context.substring(0, 500));
+      }
+      
+      // Also check for zone-based replacement detection
+      // If decision context mentions "bottom" zone and new item is bottom, force replacement
+      hasBottomZone = context.toLowerCase().includes('zone: bottom') || 
+                     (context.toLowerCase().includes('zones:') && context.toLowerCase().includes('bottom'));
+      
+      stylistLog('TryOn', '===== ZONE-BASED REPLACEMENT DETECTION =====');
+      stylistLog('TryOn', { hasBottomZone, newItemIsBottom, itemsToRemoveCount: itemsToRemove.length });
+      
+      if (hasBottomZone && newItemIsBottom) {
+        // Zone-based bottom replacement detected - force replacement mode
+        isReplacement = true;
+        if (itemsToRemove.length === 0) {
+          // No explicit items found, but we know it's a bottom replacement
+          itemsToRemove.push('[ANY BOTTOM ITEMS - pants, jeans, skirts, shorts, trousers, leggings]');
+          stylistLog('TryOn', '→ Zone-based bottom replacement detected (bottom zone + bottom item)');
+          stylistLog('TryOn', '→ Adding generic bottom items to removal list');
+        } else {
+          stylistLog('TryOn', '→ Zone-based bottom replacement confirmed with explicit items');
+        }
+      }
+      
+      // Check if it's from swipe flow (has "Swipe Flow: Outfit Context")
+      if (context.includes('Swipe Flow: Outfit Context') || context.includes('Current Outfit')) {
+        // Extract current outfit description
+        const outfitMatch = context.match(/currently wearing: ([^\n]+)/i) || 
+                           context.match(/Items detected: ([^\n]+)/);
+        const zonesMatch = context.match(/Zones occupied: ([^\n]+)/);
+        const outfitStateMatch = context.match(/Outfit State: ([^\n]+)/);
+        const integrationMatch = context.match(/Integration: ([^\n]+)/);
+        
+        if (outfitMatch) {
+          const items = outfitMatch[1].trim();
+          outfitContextSection = `\n\n${items.includes('currently wearing') ? items : `The person in the second image is currently wearing: ${items}`}`;
+        }
+        
+        if (zonesMatch) {
+          const zones = zonesMatch[1].split(', ').filter(Boolean);
+          outfitContextSection += `\nOccupied clothing zones: ${zones.join(', ')}.`;
+        }
+        
+        if (integrationMatch) {
+          integrationInstructions = integrationMatch[1].trim();
+          // Check if integration says "REPLACE"
+          if (integrationInstructions.toUpperCase().includes('REPLACE')) {
+            isReplacement = true;
+          }
+        } else if (outfitStateMatch) {
+          const state = outfitStateMatch[1].trim().toLowerCase();
+          if (state === 'separates' || state === 'one_piece') {
+            integrationInstructions = `Apply ${request.productName} naturally over or with the existing outfit, ensuring proper layering and visual harmony.`;
+          } else if (state === 'partial') {
+            integrationInstructions = `The outfit is incomplete. Apply ${request.productName} to complete the look naturally.`;
+          }
+        }
+      }
+      
+      // Also check decision context from chat flow for replacement info
+      if (context.includes('Decision Result')) {
+        // Handle both bracket formats
+        const decisionMatch = context.match(/Decision Result:[\s\S]*?-?\s*itemsToRemove:\s*\[([^\]]+)\]/) ||
+                             context.match(/Decision Result:[\s\S]*?itemsToRemove:\s*\[([^\]]+)\]/);
+        if (decisionMatch) {
+          itemsToRemove = decisionMatch[1].split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean);
+          if (itemsToRemove.length > 0) {
+            isReplacement = true;
+            stylistLog('TryOn', `Detected items to remove from decision: ${itemsToRemove.join(', ')}`);
+          }
+        }
+        
+        // Check for explicit replacement instruction
+        const replacementInstructionMatch = context.match(/replacementInstruction: ([^\n]+)/i);
+        if (replacementInstructionMatch) {
+          integrationInstructions = replacementInstructionMatch[1].trim();
+          isReplacement = true;
+          console.log('[TryOn] Found explicit replacement instruction:', integrationInstructions);
+        }
+        
+        // Check if reasoning mentions replacement
+        const reasoningMatch = context.match(/reasoning: ([^\n]+)/i);
+        if (reasoningMatch) {
+          const reasoning = reasoningMatch[1].toLowerCase();
+          if (reasoning.includes('replace') || reasoning.includes('remov')) {
+            isReplacement = true;
+          }
+        }
+        
+        // Check for replacementOperation flag
+        if (context.includes('replacementOperation: true')) {
+          isReplacement = true;
+          console.log('[TryOn] Replacement operation flag detected');
+        }
+      }
+    }
+    
+    // Check if product is a one-piece (dress, jumpsuit) - should replace top+bottom
+    const productNameLower = request.productName.toLowerCase();
+    const productDescLower = (request.productDescription || '').toLowerCase();
+    const isOnePiece = productNameLower.includes('dress') || productNameLower.includes('jumpsuit') || 
+                       productNameLower.includes('romper') || productDescLower.includes('dress') ||
+                       productDescLower.includes('jumpsuit');
+    
+    // If one-piece (dress), ALWAYS remove bottom items from the outfit
+    if (isOnePiece) {
+      // Check if bottom zone is occupied in the current outfit
+      const hasBottomZone = outfitContextSection.includes('bottom') || 
+                           (request.decisionContext && request.decisionContext.includes('bottom'));
+      
+      // Always ensure bottom items are removed for dresses
+      if (hasBottomZone || !itemsToRemove.length) {
+        // If we don't have explicit items to remove, we still need to remove bottom items
+        if (!itemsToRemove.some(item => item.toLowerCase().includes('bottom') || 
+                                   item.toLowerCase().includes('jean') || 
+                                   item.toLowerCase().includes('pant') ||
+                                   item.toLowerCase().includes('skirt') ||
+                                   item.toLowerCase().includes('short'))) {
+          // Add a note that bottom items must be removed
+          itemsToRemove.push('[ANY BOTTOM ITEMS - pants, jeans, skirts, shorts]');
+          isReplacement = true;
+          console.log('[TryOn] Dress detected - ensuring bottom items are removed');
+        }
+      }
+      
+      // Build explicit replacement instructions for dresses
+      if (isReplacement || itemsToRemove.length > 0) {
+        integrationInstructions = `REPLACE the existing top and bottom items with ${request.productName}. CRITICAL: Remove ALL bottom items (pants, jeans, skirts, shorts) completely - they must NOT be visible in the final image. Remove the current top as well. The dress should be the ONLY garment covering the torso and legs. No bottom garments should be visible underneath or alongside the dress.`;
+        console.log('[TryOn] One-piece replacement detected - updating instructions to REPLACE with explicit bottom removal');
+      } else {
+        // One-piece but no explicit replacement - still should replace if current outfit has top+bottom
+        integrationInstructions = `REPLACE the existing top and bottom items with ${request.productName}. CRITICAL: Remove ALL bottom items (pants, jeans, skirts, shorts) completely. The dress should replace both the top and bottom garments completely. No bottom garments should be visible.`;
+        isReplacement = true; // Force replacement mode for dresses
+        console.log('[TryOn] One-piece detected - defaulting to replacement instruction with bottom removal');
+      }
+    }
 
-    // Build prompt following official Google documentation format
-    // First image: Product/clothing item
-    // Second image: User/model photo
+    // Build dynamic prompt based on whether we have outfit context
+    const hasOutfitContext = !!outfitContextSection;
+    const isReplacementOperation = isReplacement || itemsToRemove.length > 0;
+    
+    // Detect zone-based replacement (same zone = replacement)
+    const newItemZone = newItemIsBottom ? 'bottom' : 
+                       (request.productName.toLowerCase().includes('top') || 
+                        request.productName.toLowerCase().includes('shirt') ||
+                        request.productName.toLowerCase().includes('blouse') ||
+                        request.productName.toLowerCase().includes('sweater')) ? 'top' : null;
+    
+    stylistLog('TryOn', '===== ZONE-BASED REPLACEMENT CHECK =====');
+    stylistLog('TryOn', { newItemZone, hasBottomZone, isReplacementOperation, currentIsReplacement: isReplacement });
+    
+    if (newItemZone && hasBottomZone && newItemZone === 'bottom' && !isReplacementOperation) {
+      // Same zone replacement detected - force replacement mode
+      isReplacement = true;
+      stylistLog('TryOn', `→ Zone-based replacement detected: ${newItemZone} replacing existing ${newItemZone}`);
+    }
+    
+    stylistLog('TryOn', '===== FINAL REPLACEMENT STATUS =====');
+    stylistLog('TryOn', { 
+      isReplacement, 
+      itemsToRemove: itemsToRemove.join(', ') || 'none',
+      isReplacementOperation,
+      newItemZone,
+      isOnePiece 
+    });
+    
+    // Build replacement-specific instructions
+    let replacementInstructions = '';
+    if (isReplacementOperation && itemsToRemove.length > 0) {
+      const bottomItems = itemsToRemove.filter(item => 
+        item.toLowerCase().includes('bottom') || 
+        item.toLowerCase().includes('jean') || 
+        item.toLowerCase().includes('pant') ||
+        item.toLowerCase().includes('skirt') ||
+        item.toLowerCase().includes('short') ||
+        item.toLowerCase().includes('[any bottom') ||
+        item.toLowerCase().includes('trouser') ||
+        item.toLowerCase().includes('legging')
+      );
+      
+      if (bottomItems.length > 0 || isOnePiece || (newItemZone === 'bottom' && isReplacementOperation)) {
+        // Bottom replacement - make instructions extremely explicit and repetitive
+        replacementInstructions = `\n\n═══════════════════════════════════════════════════════════
+CRITICAL REMOVAL INSTRUCTIONS - READ CAREFULLY:
+═══════════════════════════════════════════════════════════
+
+REMOVE THE FOLLOWING ITEMS COMPLETELY:
+${itemsToRemove.map(item => `- ${item}`).join('\n')}
+
+ESPECIALLY IMPORTANT FOR BOTTOM ITEMS:
+- Remove ALL bottom items (pants, jeans, skirts, shorts, trousers, leggings) COMPLETELY
+- Bottom items must NOT be visible in the final image AT ALL
+- Bottom items must NOT be visible underneath the new garment
+- Bottom items must NOT be visible alongside the new garment
+- The new ${request.productName} should be the ONLY item covering the lower body
+
+REPEAT: Remove ${itemsToRemove.join(', ')} COMPLETELY. They should NOT be visible in the final image.
+
+═══════════════════════════════════════════════════════════`;
+      } else {
+        // Top or other replacement - still explicit but less repetitive
+        replacementInstructions = `\n\n═══════════════════════════════════════════════════════════
+IMPORTANT REMOVAL INSTRUCTIONS:
+═══════════════════════════════════════════════════════════
+
+REMOVE THE FOLLOWING ITEMS COMPLETELY:
+${itemsToRemove.map(item => `- ${item}`).join('\n')}
+
+These items should NOT be visible in the final image.
+They should be completely removed and not visible underneath or alongside the new garment.
+
+═══════════════════════════════════════════════════════════`;
+      }
+    } else if (isReplacementOperation) {
+      // Replacement operation but no explicit items - still provide instructions
+      if (newItemZone === 'bottom') {
+        replacementInstructions = `\n\n═══════════════════════════════════════════════════════════
+CRITICAL: This is a BOTTOM REPLACEMENT operation.
+═══════════════════════════════════════════════════════════
+
+Remove ALL existing bottom items (pants, jeans, skirts, shorts, trousers) COMPLETELY.
+Bottom items must NOT be visible in the final image.
+The new ${request.productName} should be the ONLY item covering the lower body.
+
+═══════════════════════════════════════════════════════════`;
+      } else {
+        replacementInstructions = `\n\nIMPORTANT: This is a REPLACEMENT operation. Remove conflicting items from the current outfit that occupy the same zone as ${request.productName}.`;
+      }
+    } else if (isOnePiece) {
+      // Even if no explicit replacement operation, dresses always need bottom removal
+      replacementInstructions = `\n\n═══════════════════════════════════════════════════════════
+CRITICAL: This is a dress/one-piece garment.
+═══════════════════════════════════════════════════════════
+
+Remove ALL bottom items (pants, jeans, skirts, shorts, trousers) from the current outfit.
+Bottom items must NOT be visible in the final image.
+The dress should be the ONLY garment covering the torso and legs.
+
+═══════════════════════════════════════════════════════════`;
+    }
+    
+    const promptText = `You are a professional virtual try-on system. The first image contains a clothing item (${request.productName}${request.productDescription ? `: ${request.productDescription}` : ''}). The second image contains a person (model/user).${outfitContextSection}${replacementInstructions}
+        
+CRITICAL IDENTITY PRESERVATION RULES:
+- The person in the final image MUST be IDENTICAL to the person in the second image
+- Use the EXACT face, facial features, body proportions, skin tone, and pose from the second image
+- DO NOT morph, blend, or combine facial features from both images
+- DO NOT create a composite person - use ONLY the person from the second image
+- The first image is ONLY for the clothing item - do NOT use any person features from it
+- Maintain the person's exact identity, appearance, and physical characteristics from the second image
+        
+Task: ${hasOutfitContext 
+  ? `Generate a realistic virtual try-on image where the person from the second image (using their EXACT face and body) is wearing ${request.productName}${isReplacementOperation ? ' as a replacement for existing items' : ' integrated with their current outfit'}. ${integrationInstructions || 'Ensure the new item integrates naturally with existing items.'}`
+  : `Generate a realistic virtual try-on image where the person from the second image (using their EXACT face and body) is wearing the clothing item from the first image.`}
+
+Requirements:
+- Use the EXACT person from the second image - their face, body, proportions, and pose must remain unchanged
+- Extract ONLY the clothing item from the first image - do NOT use any person features from the first image
+- Apply the clothing item from the first image onto the person from the second image
+- DO NOT morph, blend, or combine features from both images
+- ${(() => {
+    if (isReplacementOperation || isOnePiece) {
+      let removalText = 'CRITICAL REMOVAL REQUIREMENT: ';
+      if (itemsToRemove.length > 0) {
+        removalText += `REMOVE the following items COMPLETELY: ${itemsToRemove.join(', ')}. `;
+      }
+      if (newItemZone === 'bottom' || isOnePiece) {
+        removalText += 'ESPECIALLY IMPORTANT: Remove ALL bottom items (pants, jeans, skirts, shorts, trousers, leggings) COMPLETELY. Bottom items must NOT be visible in the final image AT ALL. ';
+      }
+      removalText += `Apply ${request.productName} as the replacement. `;
+      if (isOnePiece) {
+        removalText += 'For dresses, ensure NO bottom garments are visible underneath or alongside the dress. The dress should be the ONLY garment covering the torso and legs.';
+      } else {
+        const zoneText = newItemZone || 'the specified zone';
+        removalText += `The new item should be the ONLY item in its zone (${zoneText}).`;
+      }
+      return removalText;
+    } else if (hasOutfitContext) {
+      return 'Maintain the person\'s current outfit visible and integrate the new item naturally with proper layering';
+    } else {
+      return 'Apply the clothing item from the first image onto the person';
+    }
+  })()}
+- PRESERVE IDENTITY: The person's face, facial features, body shape, skin tone, hair, and all physical characteristics must be EXACTLY as they appear in the second image
+- DO NOT alter the person's appearance - only change the clothing
+- The person's face must be IDENTICAL to the second image - same eyes, nose, mouth, bone structure
+- The person's body proportions and pose must match the second image exactly
+- Adjust lighting and shadows to match naturally while preserving the person's exact appearance
+- Ensure the clothing fits realistically with proper draping and fit
+- The clothing should appear as if it was photographed on the exact same person from the second image
+- ${isReplacementOperation || isOnePiece
+  ? `REPLACEMENT MODE: The new item (${request.productName}) must completely replace the removed items. DO NOT show both old and new items together. ${itemsToRemove.length > 0 ? `The removed items (${itemsToRemove.join(', ')}) must be completely invisible in the final image. ` : ''}${newItemZone === 'bottom' || isOnePiece ? 'For bottom replacements or dresses, ensure NO bottom garments are visible - the new item should be the ONLY garment covering the lower body. ' : ''}${isOnePiece ? 'The dress should be the ONLY garment covering the torso and legs - no bottom items should be visible underneath, alongside, or anywhere in the image.' : ''}`
+  : hasOutfitContext 
+    ? 'Ensure proper layering - the new item should be visible over/with existing items as appropriate for the garment type'
+    : ''}
+- Generate a high-quality, professional e-commerce style photo
+- The output should be a full-body or appropriate crop showing the person wearing the item${hasOutfitContext && !isReplacementOperation && !isOnePiece ? ' with their complete outfit' : ''}
+
+═══════════════════════════════════════════════════════════
+FINAL CRITICAL REMINDERS:
+═══════════════════════════════════════════════════════════
+
+1. IDENTITY PRESERVATION (MOST IMPORTANT):
+   - The person in the final image MUST be IDENTICAL to the person in the second image
+   - Use the EXACT face, facial features, and body from the second image
+   - DO NOT morph, blend, or combine features from both images
+   - The first image is ONLY for clothing - ignore any person in it
+
+2. CLOTHING APPLICATION:
+   - Apply ONLY the clothing item from the first image
+   - The clothing should fit naturally on the person from the second image
+   ${isReplacementOperation && itemsToRemove.length > 0 ? `- REMOVE these items completely: ${itemsToRemove.join(', ')}` : ''}
+
+═══════════════════════════════════════════════════════════
+
+${request.decisionContext && !hasOutfitContext ? `\n\nAdditional Context:\n${request.decisionContext.trim()}` : ''}`;
+
+    stylistLog('TryOn', '===== TRY-ON SYSTEM PROMPT =====');
+    if (hasOutfitContext) {
+      stylistLog('TryOn', '→ PROMPT UPDATED WITH OUTFIT CONTEXT');
+      stylistLog('TryOn', `→ Current outfit: ${outfitContextSection.split('\n')[1]?.replace(/^\s*/, '') || 'N/A'}`);
+      stylistLog('TryOn', `→ Integration: ${integrationInstructions || 'Natural integration'}`);
+      if (isReplacementOperation) {
+        stylistLog('TryOn', `→ REPLACEMENT OPERATION: Removing items: ${itemsToRemove.join(', ') || 'conflicting items'}`);
+      }
+    } else {
+      stylistLog('TryOn', '→ STANDARD PROMPT (no outfit context)');
+    }
+    stylistLog('TryOn', promptText);
+    stylistLog('TryOn', '===== END TRY-ON PROMPT =====');
+    
     const prompt = [
       {
         inlineData: {
@@ -275,20 +661,7 @@ export async function generateVirtualTryOn(
         },
       },
       {
-        text: `You are a professional virtual try-on system. The first image contains a clothing item (${request.productName}${request.productDescription ? `: ${request.productDescription}` : ''}). The second image contains a person (model/user). 
-
-Task: Generate a realistic virtual try-on image where the person from the second image is wearing the clothing item from the first image.
-
-Requirements:
-- Extract the person's face and body from the second image
-- Apply the clothing item from the first image onto the person
-- Maintain the person's facial features, body proportions, and pose
-- Adjust lighting and shadows to match naturally
-- Ensure the clothing fits realistically with proper draping and fit
-- Generate a high-quality, professional e-commerce style photo
-- The output should be a full-body or appropriate crop showing the person wearing the item
-
-Generate the virtual try-on image now.`,
+        text: promptText,
       },
     ];
 
@@ -452,7 +825,8 @@ export async function batchGenerateTryOns(
 // Generate layered outfit by sequentially applying items to a base user photo
 export async function generateOutfitTryOn(
   userPhotoUrl: string,
-  items: OutfitItem[]
+  items: OutfitItem[],
+  options?: { decisionContext?: string }
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   try {
     console.log('[TRYON] ===== Starting outfit generation =====');
@@ -482,6 +856,7 @@ export async function generateOutfitTryOn(
         productImageUrl: item.imageUrl,
         productName: item.name,
         productDescription: `${item.brand || ''} ${item.category || ''}`.trim() || undefined,
+        decisionContext: options?.decisionContext,
       });
       
       if (!res.success || !res.imageUrl) {

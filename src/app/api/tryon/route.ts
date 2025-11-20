@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { userPhotoUrl, productImageUrl, productName, productDescription } = body;
+    const { userPhotoUrl, productImageUrl, productName, productDescription, outfitAnalysis } = body;
 
     if (!userPhotoUrl || !productImageUrl || !productName) {
       return NextResponse.json(
@@ -92,12 +92,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Build decision context from outfit analysis if provided
+    let decisionContext: string | undefined;
+    if (outfitAnalysis) {
+      const { buildDecisionContextFromOutfitAnalysis } = await import('@/services/outfitDecisionContext');
+      decisionContext = buildDecisionContextFromOutfitAnalysis(
+        outfitAnalysis,
+        productName,
+        productDescription || productName.toLowerCase() // Use product name as category fallback
+      );
+      console.log('[TRYON API] Built decision context from outfit analysis:', {
+        itemCount: outfitAnalysis.items?.length || 0,
+        zones: outfitAnalysis.detectedZones || [],
+      });
+    }
+
     const result = await generateVirtualTryOn({
       userPhotoUrl,
       productImageUrl,
       productName,
       productDescription,
       promptVersion: 1,
+      decisionContext,
     });
 
     if (!result.success) {

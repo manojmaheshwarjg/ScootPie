@@ -25,6 +25,20 @@ export const photos = pgTable('photos', {
   metadata: jsonb('metadata').$type<{
     bodyTypeAnalysis?: Record<string, any>;
     dominantColors?: string[];
+    outfitAnalysis?: {
+      items: Array<{
+        name: string;
+        category: string;
+        zone?: string;
+        color?: string;
+        style?: string[];
+        pattern?: string;
+        brand?: string;
+      }>;
+      confidence: number;
+      detectedZones: string[];
+      analyzedAt: string;
+    };
   }>(),
 });
 
@@ -103,6 +117,10 @@ export const messages = pgTable('messages', {
     retailer?: string;
     category?: string;
   }>>(),
+  // Fashion AI Stylist fields
+  clarificationContext: jsonb('clarification_context'),
+  requestType: varchar('request_type', { length: 50 }),
+  outfitState: varchar('outfit_state', { length: 50 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -144,7 +162,34 @@ export const userStyleProfiles = pgTable('user_style_profiles', {
   priceSensitivity: decimal('price_sensitivity', { precision: 3, scale: 2 }),
   colorPreferences: jsonb('color_preferences').$type<Record<string, number>>(),
   brandAffinities: jsonb('brand_affinities').$type<Record<string, number>>(),
+  // Fashion AI Stylist preference fields
+  avoidedItems: jsonb('avoided_items').$type<string[]>(),
+  favoriteColors: jsonb('favorite_colors').$type<string[]>(),
+  stylePreference: varchar('style_preference', { length: 50 }),
+  formalityPreference: integer('formality_preference'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Fashion AI Stylist: Outfit History table for undo/redo
+export const outfitHistory = pgTable('outfit_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+  outfitState: varchar('outfit_state', { length: 50 }),
+  items: jsonb('items').notNull().$type<Array<{
+    name: string;
+    imageUrl: string;
+    productUrl: string;
+    price?: number;
+    currency?: string;
+    brand?: string;
+    retailer?: string;
+    category?: string;
+    zone?: string;
+    zIndex?: number;
+  }>>(),
+  imageUrl: text('image_url'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Relations
@@ -183,6 +228,7 @@ export const collectionItemsRelations = relations(collectionItems, ({ one }) => 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
   user: one(users, { fields: [conversations.userId], references: [users.id] }),
   messages: many(messages),
+  outfitHistory: many(outfitHistory),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
@@ -191,4 +237,9 @@ export const messagesRelations = relations(messages, ({ one }) => ({
 
 export const userStyleProfilesRelations = relations(userStyleProfiles, ({ one }) => ({
   user: one(users, { fields: [userStyleProfiles.userId], references: [users.id] }),
+}));
+
+export const outfitHistoryRelations = relations(outfitHistory, ({ one }) => ({
+  conversation: one(conversations, { fields: [outfitHistory.conversationId], references: [conversations.id] }),
+  message: one(messages, { fields: [outfitHistory.messageId], references: [messages.id] }),
 }));

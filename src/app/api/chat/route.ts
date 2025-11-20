@@ -5,6 +5,7 @@ import { conversations, messages, users, products } from '@/lib/db/schema';
 import { eq, desc, and, or, ilike, sql } from 'drizzle-orm';
 import { generateOutfitTryOn, type OutfitItem } from '@/services/tryon';
 import { GoogleGenAI } from '@google/genai';
+import { integrateFashionStylist } from '@/services/fashionStylistIntegration';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -27,13 +28,20 @@ export async function POST(req: NextRequest) {
     console.log('[CHAT] Raw body keys:', Object.keys(body));
     console.log('[CHAT] Raw body:', JSON.stringify(body).slice(0, 200));
     
-    const { message, conversationId, priorItems, priorOutfitImage } = body as { message: string; conversationId?: string; priorItems?: OutfitItem[]; priorOutfitImage?: string };
+    const { message, conversationId, priorItems, priorOutfitImage, pendingClarification } = body as { 
+      message: string; 
+      conversationId?: string; 
+      priorItems?: OutfitItem[]; 
+      priorOutfitImage?: string;
+      pendingClarification?: any;
+    };
     console.log('[CHAT] userId:', userId);
     console.log('[CHAT] message:', message);
     console.log('[CHAT] priorItems type:', typeof priorItems, 'isArray:', Array.isArray(priorItems));
     console.log('[CHAT] priorItems:', Array.isArray(priorItems) ? `${priorItems.length} items: ${priorItems.map(i => i.name).join(', ')}` : JSON.stringify(priorItems));
     console.log('[CHAT] priorOutfitImage type:', typeof priorOutfitImage);
     console.log('[CHAT] priorOutfitImage:', priorOutfitImage ? `exists (${priorOutfitImage.slice(0, 60)}...)` : 'none');
+    console.log('[CHAT] pendingClarification:', pendingClarification ? pendingClarification.question : 'none');
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
@@ -56,6 +64,27 @@ export async function POST(req: NextRequest) {
         needsPhoto: true,
       }, { status: 400 });
     }
+    
+    // Check if outfit analysis exists (required for chat)
+    if (!primaryPhoto.metadata?.outfitAnalysis) {
+      console.warn('[CHAT] ⚠️ No outfit analysis found in primary photo');
+      console.warn('[CHAT] ⚠️ Outfit analysis is required for chat functionality');
+      return NextResponse.json({
+        error: 'Outfit analysis is required before using chat. Please re-upload your photo from the profile page to trigger outfit analysis.',
+        needsOutfitAnalysis: true,
+        code: 'OUTFIT_ANALYSIS_REQUIRED',
+      }, { status: 400 });
+    }
+    
+    // Log outfit analysis details
+    const outfitAnalysis = primaryPhoto.metadata.outfitAnalysis;
+    console.log('[CHAT] ✓ Primary photo has stored outfit analysis:', {
+      itemCount: outfitAnalysis.items.length,
+      items: outfitAnalysis.items.map((i: any) => i.name),
+      zones: outfitAnalysis.detectedZones,
+      confidence: outfitAnalysis.confidence,
+      analyzedAt: outfitAnalysis.analyzedAt,
+    });
 
     // Check if user has gender preference (required for virtual try-on)
     const userPreferences = user.preferences;
@@ -420,56 +449,133 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Use AI Stylist to analyze the request and make decisions
+    console.log('[CHAT] ===== FASHION AI STYLIST =====');
+    
+    // Option 1: Use photo-based outfit analysis if no priorItems and user has photo
+    // Option 2: Use priorItems (items from previous chat messages)
+    let currentItems = Array.isArray(priorItems) ? priorItems : [];
+    
+    // Determine outfit source for decision context
+    let outfitSource: 'photo' | 'prior_items' | 'empty' = currentItems.length > 0 ? 'prior_items' : 'empty';
+    
+    // Store original photo outfit for restoration (e.g., when replacing dress with top, restore original bottom)
+    let originalPhotoOutfit: OutfitItem[] | undefined;
+    
+    // If no prior items but user has a photo, use stored outfit analysis from photo metadata
+    // Note: We already checked that outfitAnalysis exists above, so it should be available
+    if (currentItems.length === 0 && primaryPhoto && !priorOutfitImage) {
+      console.log('[CHAT] No prior items found. Using stored outfit analysis from photo metadata...');
+      
+      // Use the outfit analysis we already verified exists
+      const storedAnalysis = primaryPhoto.metadata!.outfitAnalysis!;
+      console.log('[CHAT] Using stored outfit analysis:', {
+        itemCount: storedAnalysis.items.length,
+        items: storedAnalysis.items.map((i: any) => i.name),
+        zones: storedAnalysis.detectedZones,
+        confidence: storedAnalysis.confidence,
+        analyzedAt: storedAnalysis.analyzedAt,
+      });
+      
+      // Convert stored analysis to OutfitItem format
+      const { photoOutfitToItems } = await import('@/services/photoOutfitHelper');
+      currentItems = photoOutfitToItems(storedAnalysis);
+      originalPhotoOutfit = [...currentItems]; // Store original for restoration
+      
+      outfitSource = 'photo';
+      console.log('[CHAT] ✓ Using stored photo-analyzed outfit as current outfit for decision tree');
+      console.log('[CHAT] ✓ Stored original photo outfit for potential restoration:', originalPhotoOutfit.map(i => i.name));
+    } else if (primaryPhoto && primaryPhoto.metadata?.outfitAnalysis) {
+      // Even if we have prior items, store original photo outfit for restoration
+      const { photoOutfitToItems } = await import('@/services/photoOutfitHelper');
+      originalPhotoOutfit = photoOutfitToItems(primaryPhoto.metadata.outfitAnalysis);
+      console.log('[CHAT] ✓ Stored original photo outfit for potential restoration:', originalPhotoOutfit.map(i => i.name));
+    }
+    
+    const stylistResult = await integrateFashionStylist(
+      message,
+      currentItems,
+      outfitItems,
+      conversation.id,
+      user.id,
+      outfitSource,
+      originalPhotoOutfit
+    );
+    
+    console.log('[CHAT] Stylist integration result:', {
+      shouldProceed: stylistResult.shouldProceed,
+      needsClarification: stylistResult.needsClarification,
+      shouldRegenerateFromScratch: stylistResult.shouldRegenerateFromScratch,
+      decisionContextLength: stylistResult.decisionContextPrompt?.length
+    });
+
+    if (!stylistResult.shouldProceed) {
+      if (stylistResult.needsClarification && stylistResult.clarificationQuestion) {
+        console.log('[CHAT] Stylist needs clarification');
+        const [assistantMessage] = await db.insert(messages).values({
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: stylistResult.responseText,
+          clarificationContext: stylistResult.clarificationQuestion,
+        }).returning();
+
+        await db.update(conversations)
+          .set({ lastMessageAt: assistantMessage.createdAt })
+          .where(eq(conversations.id, conversation.id));
+
+        return NextResponse.json({
+          success: true,
+          message: {
+            id: assistantMessage.id,
+            role: 'assistant',
+            content: stylistResult.responseText,
+            clarificationQuestion: stylistResult.clarificationQuestion,
+            timestamp: assistantMessage.createdAt.toISOString(),
+          },
+          conversationId: conversation.id,
+        });
+      }
+
+      // If stylist declined without clarification, fall back gracefully
+      responseText = stylistResult.responseText || responseText;
+    }
+
+    const mergedItems: OutfitItem[] = stylistResult.finalItems.length > 0
+      ? stylistResult.finalItems
+      : [...currentItems, ...outfitItems];
+
+    const decisionContextPrompt = stylistResult.decisionContextPrompt || '';
+    const shouldRegenerateFromScratch = stylistResult.shouldRegenerateFromScratch;
+    responseText = stylistResult.responseText || responseText;
+
+    console.log('[CHAT] Final merged items:', mergedItems.map(i => ({ name: i.name, category: i.category, zone: (i as any).zone })));
+
     // Generate outfit image if items found
     let outfitImageUrl: string | undefined;
-    // Merge prior context items, but REPLACE items in same category
-    const mergedItems: OutfitItem[] = mergeOutfitItems(
-      Array.isArray(priorItems) ? priorItems : [],
-      outfitItems
-    );
-    console.log('[CHAT] mergedItems after category merge:', mergedItems.map(i => ({name:i.name, category:i.category, brand:i.brand})));
-
-    // Only send items that have an image to the try-on pipeline
     const itemsForTryOn = mergedItems.filter(i => !!i.imageUrl);
+    let itemsToApply: OutfitItem[] = []; // Define outside block for debug info
 
     if (itemsForTryOn.length > 0) {
       console.log('[CHAT] ===== GENERATING TRY-ON =====');
-      console.log('[CHAT] Prior items count:', Array.isArray(priorItems) ? priorItems.length : 0);
-      console.log('[CHAT] New items count:', outfitItems.length);
-      console.log('[CHAT] Merged items count:', mergedItems.length);
-      console.log('[CHAT] Items for try-on:', itemsForTryOn.map(i => ({name: i.name, category: i.category})));
-      
-      // Determine if we replaced any items (category overlap)
-      const newCategories = new Set(outfitItems.map(i => normalizeCategory(i.category)));
-      const hasPriorContext = Array.isArray(priorItems) && priorItems.length > 0;
-      const hadReplacement = hasPriorContext && priorItems.some(i => newCategories.has(normalizeCategory(i.category)));
-      
-      console.log('[CHAT] ===== CONTEXT DECISION =====');
-      console.log('[CHAT] Has prior context?', hasPriorContext);
-      console.log('[CHAT] Has prior outfit image?', !!priorOutfitImage);
-      console.log('[CHAT] New categories:', Array.from(newCategories));
-      if (hasPriorContext) {
-        console.log('[CHAT] Prior categories:', priorItems.map(i => normalizeCategory(i.category)));
-      }
-      console.log('[CHAT] Had replacement?', hadReplacement);
+      console.log('[CHAT] Should regenerate from scratch?', stylistResult.shouldRegenerateFromScratch);
       
       let baseImage: string;
-      let itemsToApply: OutfitItem[];
       
-      if (hadReplacement) {
-        // REPLACEMENT: Regenerate from scratch with all merged items
-        // Because the prior outfit image contains the OLD item we're replacing
-        console.log('[CHAT] DECISION: Category replacement - regenerating from original photo with all merged items');
+      if (stylistResult.shouldRegenerateFromScratch) {
+        // Regenerate from scratch with all merged items
+        console.log('[CHAT] DECISION: Regenerating from original photo with all merged items');
         baseImage = primaryPhoto.url;
-        itemsToApply = itemsForTryOn; // All merged items
-      } else if (priorOutfitImage && hasPriorContext) {
-        // ADDITION: Use prior outfit as base and only apply NEW items
-        // This is incremental - we build on top of existing outfit
-        console.log('[CHAT] DECISION: Addition - building on prior outfit with new items only');
+        itemsToApply = itemsForTryOn;
+      } else if (priorOutfitImage && currentItems.length > 0) {
+        // Build on top of existing outfit with only new items
+        console.log('[CHAT] DECISION: Building on prior outfit with new items only');
         baseImage = priorOutfitImage;
-        itemsToApply = outfitItems; // Only the new items
+        // Find items that are in finalItems but not in currentItems (i.e., newly added items)
+        const currentItemNames = new Set(currentItems.map(item => item.name));
+        const newItems = mergedItems.filter(item => !currentItemNames.has(item.name) && !!item.imageUrl);
+        itemsToApply = newItems;
       } else {
-        // FIRST TIME: Use original user photo
+        // First time or no prior context
         console.log('[CHAT] DECISION: First outfit - using original user photo');
         baseImage = primaryPhoto.url;
         itemsToApply = itemsForTryOn;
@@ -477,14 +583,14 @@ export async function POST(req: NextRequest) {
       
       console.log('[CHAT] Base image:', baseImage === primaryPhoto.url ? 'original user photo' : 'prior outfit');
       console.log('[CHAT] Items to apply:', itemsToApply.map(i => i.name));
-      console.log('[CHAT] Base image preview:', baseImage.slice(0, 50));
       
-      const outfitResult = await generateOutfitTryOn(baseImage, itemsToApply);
+      const outfitResult = await generateOutfitTryOn(baseImage, itemsToApply, {
+        decisionContext: decisionContextPrompt,
+      });
       
       console.log('[CHAT] Try-on result:', { 
         success: outfitResult.success, 
         hasImage: !!outfitResult.imageUrl, 
-        imagePreview: outfitResult.imageUrl?.slice(0, 100),
         error: outfitResult.error 
       });
       console.log('[CHAT] ===== TRY-ON COMPLETE =====');
@@ -496,26 +602,15 @@ export async function POST(req: NextRequest) {
       console.log('[CHAT] Skipping try-on: no items with imageUrl');
     }
 
-    // Generate AI response
+    // Generate AI response using stylist's response text
     if (mergedItems.length > 0) {
       const itemsList = mergedItems.map(item => {
         const cat = normalizeCategory(item.category);
         return `${item.name} (${cat})`;
       }).join(', ');
       
-      if (outfitItems.length > 0 && Array.isArray(priorItems) && priorItems.length > 0) {
-        // Check if we replaced anything
-        const newCats = new Set(outfitItems.map(i => normalizeCategory(i.category)));
-        const hadReplacement = priorItems.some(i => newCats.has(normalizeCategory(i.category)));
-        
-        if (hadReplacement) {
-          responseText = `Updated your outfit! Now wearing: ${itemsList}. Want to add or replace anything else?`;
-        } else {
-          responseText = `Added to your outfit! Now wearing: ${itemsList}. Keep building your look by adding more items!`;
-        }
-      } else {
-        responseText = `Here's your look with: ${itemsList}. Add more items to complete your outfit (e.g., 'black jeans', 'white sneakers')!`;
-      }
+      // Use stylist's response text and enhance it with item list
+      responseText = `${stylistResult.responseText} Now wearing: ${itemsList}. ${mergedItems.length < 3 ? 'Keep building your look by adding more items!' : 'Want to add or replace anything else?'}`;
     } else {
       // Include user preferences context in error message if available
       const prefContext = userPreferences?.gender && userPreferences.gender !== 'prefer-not-to-say' 
@@ -532,12 +627,25 @@ export async function POST(req: NextRequest) {
       productRecommendations: mergedItems.length > 0 ? mergedItems.map(i => i.name) : undefined,
       outfitImageUrl: outfitImageUrl,
       outfitProducts: mergedItems.length > 0 ? mergedItems : undefined,
+      requestType: stylistResult.requestType,
     }).returning();
 
     // Update conversation lastMessageAt based on assistant message timestamp
     await db.update(conversations)
       .set({ lastMessageAt: assistantMessage.createdAt })
       .where(eq(conversations.id, conversation.id));
+
+    // Collect debug logs for client (in development)
+    const debugInfo: any = {};
+    if (process.env.NODE_ENV === 'development') {
+      debugInfo.stylist = {
+        classification: stylistResult.requestType || 'unknown',
+        decision: stylistResult.shouldRegenerateFromScratch ? 'REGENERATE_FROM_SCRATCH' : 'LAYER_ON_EXISTING',
+        finalItemsCount: mergedItems.length,
+        itemsToApplyCount: itemsToApply?.length || 0,
+        decisionContextLength: stylistResult.decisionContextPrompt?.length || 0,
+      };
+    }
 
     return NextResponse.json({
       success: true,
@@ -550,6 +658,7 @@ export async function POST(req: NextRequest) {
         timestamp: assistantMessage.createdAt.toISOString(),
       },
       conversationId: conversation.id,
+      debug: debugInfo, // Only in development
     });
 
   } catch (error) {

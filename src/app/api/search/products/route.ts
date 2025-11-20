@@ -136,9 +136,11 @@ export async function GET(req: NextRequest) {
     }
 
     const url = new URL('https://serpapi.com/search.json');
-    url.searchParams.set('engine', 'google_shopping_light');
+    // Use regular google_shopping for better image support (has thumbnails)
+    url.searchParams.set('engine', 'google_shopping');
     url.searchParams.set('q', q); // Already enhanced with user preferences
     url.searchParams.set('api_key', apiKey);
+    url.searchParams.set('num', '50'); // Get more results to account for filtering
 
     const resp = await fetch(url.toString());
     if (!resp.ok) {
@@ -151,6 +153,12 @@ export async function GET(req: NextRequest) {
     const results = Array.isArray(json?.shopping_results) ? json.shopping_results : [];
     console.log('[SEARCH] results:', results.length);
     console.log('[SEARCH] sample:', results.slice(0,3).map((r:any)=>({title:r.title, source:r.source, hasThumb: !!r.thumbnail})));
+    
+    // If no results from SerpAPI, fallback to internal products immediately
+    if (results.length === 0) {
+      console.log('[SEARCH] No results from SerpAPI, falling back to internal products');
+      return await getInternalProducts(q, count, userPreferences);
+    }
 
     const isExternalRetailerUrl = (u?: string) => {
       if (!u || typeof u !== 'string') return false;
@@ -210,8 +218,17 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const picked = results.slice(0, count);
-    const products = await Promise.all(picked.map(async (r: any, idx: number) => {
+    // Increase the slice to account for filtering out products without images
+    const picked = results.slice(0, Math.min(count * 3, results.length));
+    
+    if (picked.length === 0) {
+      console.log('[SEARCH] No results to process, falling back to internal products');
+      return await getInternalProducts(q, count, userPreferences);
+    }
+    
+    let allProducts: any[] = [];
+    try {
+      allProducts = await Promise.all(picked.map(async (r: any, idx: number) => {
       // Attempt to parse price and currency
       let price = 0;
       let currency = 'USD';
@@ -230,18 +247,42 @@ export async function GET(req: NextRequest) {
 
       const productUrl = pickRetailerUrl(r);
 
-      // Guarantee thumbnail
-      let imageUrl: string | null = r.thumbnail || r.image || null;
+      // Try multiple image sources in order of preference
+      let imageUrl: string | null = null;
+      
+      // 1. Direct thumbnail from result
+      imageUrl = r.thumbnail || r.image || r.original_image || null;
+      if (imageUrl) console.log('[SEARCH] Using direct thumbnail for', r.title);
+      
+      // 2. Try product API if we have product_id
       if (!imageUrl && r.product_id) {
         imageUrl = await fetchProductImageFromSerpProduct(r.product_id);
         if (imageUrl) console.log('[SEARCH] filled via product API for', r.product_id);
       }
-      if (!imageUrl) {
+      
+      // 3. Try og:image from product page
+      if (!imageUrl && productUrl && productUrl !== '#') {
         imageUrl = await fetchOgImage(productUrl);
         if (imageUrl) console.log('[SEARCH] filled via og:image for', productUrl);
       }
+      
+      // 4. Try extracting from any image fields in the result
       if (!imageUrl) {
-        console.warn('[SEARCH] No image found for result', r.title);
+        const possibleImages = [
+          r.thumbnail,
+          r.image,
+          r.original_image,
+          r.images?.[0]?.link,
+          r.images?.[0]?.thumbnail,
+          r.product_photos?.[0]?.link,
+          r.product_photos?.[0]?.thumbnail,
+        ].filter(Boolean);
+        imageUrl = possibleImages[0] || null;
+        if (imageUrl) console.log('[SEARCH] Using alternative image field for', r.title);
+      }
+      
+      if (!imageUrl) {
+        console.warn('[SEARCH] No image found for result', r.title, 'Available fields:', Object.keys(r).filter(k => k.toLowerCase().includes('image') || k.toLowerCase().includes('thumb')));
       }
 
       return {
@@ -265,9 +306,169 @@ export async function GET(req: NextRequest) {
         isEditorial: false,
         isExternal: true,
       };
-    }));
+      }));
+    } catch (error) {
+      console.error('[SEARCH] Error processing products:', error);
+      // If processing fails, fallback to internal products
+      return await getInternalProducts(q, count, userPreferences);
+    }
 
-    return NextResponse.json({ products, count: products.length, source: 'serpapi' });
+    // Filter out products without valid images
+    let productList = allProducts.filter(p => p.imageUrl && p.imageUrl.trim() !== '');
+    console.log(`[SEARCH] Filtered products with images: ${allProducts.length} -> ${productList.length} (removed ${allProducts.length - productList.length} without images)`);
+    
+    // Ensure productList is always defined
+    if (!productList) {
+      productList = [];
+    }
+    
+    // If we don't have enough products with images, try to get more
+    if (productList.length < count && productList.length < results.length) {
+      console.log(`[SEARCH] Not enough products with images (${productList.length}/${count}), trying to fetch more from remaining results`);
+      const remainingResults = results.slice(picked.length, Math.min(results.length, picked.length + count * 2));
+      const moreProducts = await Promise.all(remainingResults.map(async (r: any, idx: number) => {
+        let price = 0;
+        let currency = 'USD';
+        if (typeof r.price === 'string') {
+          const m = r.price.match(/([A-Z$£€₹]{0,3})\s*([0-9,.]+)/);
+          if (m) {
+            const symbol = m[1] || '';
+            const amount = m[2]?.replace(/,/g, '') || '0';
+            price = parseFloat(amount);
+            if (symbol.includes('$')) currency = 'USD';
+            else if (symbol.includes('€')) currency = 'EUR';
+            else if (symbol.includes('£')) currency = 'GBP';
+            else if (symbol.includes('₹')) currency = 'INR';
+          }
+        }
+
+        const productUrl = pickRetailerUrl(r);
+        
+        // Try multiple image sources in order of preference (same as above)
+        let imageUrl: string | null = null;
+        
+        // 1. Direct thumbnail from result
+        imageUrl = r.thumbnail || r.image || r.original_image || null;
+        
+        // 2. Try product API if we have product_id
+        if (!imageUrl && r.product_id) {
+          imageUrl = await fetchProductImageFromSerpProduct(r.product_id);
+        }
+        
+        // 3. Try og:image from product page
+        if (!imageUrl && productUrl && productUrl !== '#') {
+          imageUrl = await fetchOgImage(productUrl);
+        }
+        
+        // 4. Try extracting from any image fields in the result
+        if (!imageUrl) {
+          const possibleImages = [
+            r.thumbnail,
+            r.image,
+            r.original_image,
+            r.images?.[0]?.link,
+            r.images?.[0]?.thumbnail,
+            r.product_photos?.[0]?.link,
+            r.product_photos?.[0]?.thumbnail,
+          ].filter(Boolean);
+          imageUrl = possibleImages[0] || null;
+        }
+
+        return {
+          id: `serp-${r.product_id || r.position || idx}-${Math.random().toString(36).slice(2, 8)}`,
+          externalId: r.product_id || undefined,
+          name: r.title || 'Product',
+          brand: r.source || r.store || 'Unknown',
+          price: isFinite(price) ? price : 0,
+          currency,
+          retailer: r.source || r.store || 'Unknown',
+          category: 'search',
+          subcategory: undefined,
+          imageUrl: imageUrl || '',
+          productUrl,
+          description: r.extracted_price ? `${r.extracted_price}` : undefined,
+          availableSizes: undefined,
+          colors: undefined,
+          inStock: true,
+          trending: false,
+          isNew: false,
+          isEditorial: false,
+          isExternal: true,
+        };
+      }));
+      
+      const moreWithImages = moreProducts.filter(p => p.imageUrl && p.imageUrl.trim() !== '');
+      productList.push(...moreWithImages);
+      console.log(`[SEARCH] Added ${moreWithImages.length} more products with images, total now: ${productList.length}`);
+    }
+
+    // If we still don't have enough products with images, fall back to internal products
+    if (productList.length < count) {
+      console.log(`[SEARCH] Only found ${productList.length} products with images (need ${count}), falling back to internal products`);
+      const searchParams = req.nextUrl.searchParams;
+      let fallbackQuery = searchParams.get('q') || '';
+      const fallbackCount = count - productList.length;
+      
+      try {
+        // Directly query internal products instead of calling the function that returns NextResponse
+        const searchTerm = fallbackQuery.trim() ? `%${fallbackQuery.trim()}%` : null;
+        let internalResults: any[];
+        
+        if (searchTerm) {
+          internalResults = await db
+            .select()
+            .from(products)
+            .where(
+              or(
+                ilike(products.name, searchTerm),
+                ilike(products.brand, searchTerm),
+                ilike(products.category, searchTerm),
+                sql`COALESCE(${products.description}, '') ILIKE ${searchTerm}`
+              )
+            )
+            .limit(fallbackCount * 2); // Get more to account for filtering
+        } else {
+          internalResults = await db
+            .select()
+            .from(products)
+            .where(eq(products.trending, true))
+            .limit(fallbackCount * 2);
+        }
+        
+        // Filter to only products with images
+        const internalWithImages = internalResults
+          .filter(p => p.imageUrl && p.imageUrl.trim() !== '')
+          .slice(0, fallbackCount)
+          .map((p) => ({
+            id: p.id,
+            externalId: p.externalId,
+            name: p.name,
+            brand: p.brand,
+            price: parseFloat(p.price),
+            currency: p.currency,
+            retailer: p.retailer,
+            category: p.category,
+            subcategory: p.subcategory,
+            imageUrl: p.imageUrl,
+            productUrl: p.productUrl,
+            description: p.description,
+            availableSizes: p.availableSizes,
+            colors: p.colors,
+            inStock: p.inStock,
+            trending: p.trending,
+            isNew: p.isNew,
+            isEditorial: p.isEditorial,
+            isExternal: false,
+          }));
+        
+        productList.push(...internalWithImages);
+        console.log(`[SEARCH] Added ${internalWithImages.length} internal products with images, total now: ${productList.length}`);
+      } catch (error) {
+        console.error('[SEARCH] Failed to fetch internal products as fallback:', error);
+      }
+    }
+
+    return NextResponse.json({ products: productList.slice(0, count), count: productList.slice(0, count).length, source: 'serpapi' });
   } catch (error) {
     console.error('[SEARCH] SerpAPI error:', error);
     if (error instanceof Error) {

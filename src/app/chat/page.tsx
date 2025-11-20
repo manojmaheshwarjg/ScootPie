@@ -15,6 +15,11 @@ interface ChatProduct {
   retailer?: string;
 }
 
+interface ClarificationQuestion {
+  question: string;
+  options: Array<{id: string; label: string; value: any}>;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -23,6 +28,8 @@ interface Message {
   outfitImage?: string;
   products?: ChatProduct[];
   baseImageUrl?: string; // The base image used for this try-on (for next iteration)
+  clarificationQuestion?: ClarificationQuestion;
+  requestType?: string;
 }
 
 type ConversationSummary = { id: string; createdAt: string; lastMessageAt: string };
@@ -159,6 +166,13 @@ if (Array.isArray(data.messages)) {
     return lastAssistant?.products || [];
   };
 
+  const handleClarificationResponse = async (option: {id: string; label: string; value: any}) => {
+    // Respond to clarification with the selected option
+    // For now, just send the label as the message
+    setInput(option.label);
+    await handleSend();
+  };
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -207,12 +221,25 @@ if (Array.isArray(data.messages)) {
           productsCount: data.message?.products?.length || 0,
           content: data.message?.content
         });
+        
+        // Log stylist debug info if available
+        if (data.debug?.stylist) {
+          console.log('[CHAT UI] ===== STYLIST DEBUG INFO =====');
+          console.log('[CHAT UI] Classification:', data.debug.stylist.classification);
+          console.log('[CHAT UI] Decision:', data.debug.stylist.decision);
+          console.log('[CHAT UI] Final items count:', data.debug.stylist.finalItemsCount);
+          console.log('[CHAT UI] Items to apply count:', data.debug.stylist.itemsToApplyCount);
+          console.log('[CHAT UI] Decision context length:', data.debug.stylist.decisionContextLength, 'chars');
+          console.log('[CHAT UI] ===== END STYLIST DEBUG =====');
+        }
         const assistantMessage: Message = {
           id: data.message.id,
           role: 'assistant',
           content: data.message.content,
           outfitImage: data.message.outfitImage,
           products: data.message.products,
+          clarificationQuestion: data.message.clarificationQuestion,
+          requestType: data.message.requestType,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMessage]);
@@ -221,9 +248,35 @@ if (Array.isArray(data.messages)) {
         }
       } else {
         const text = await res.text();
+        let errorMessage = 'Sorry, I could not process that request.';
+        
+        try {
+          const errorData = JSON.parse(text);
+          if (errorData.code === 'OUTFIT_ANALYSIS_REQUIRED') {
+            errorMessage = 'Outfit analysis is required before using chat. Please re-upload your photo from the profile page to trigger outfit analysis.';
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (e) {
+          // If not JSON, use the text as-is
+          if (text) {
+            try {
+              const errorData = JSON.parse(text);
+              errorMessage = errorData.error || errorMessage;
+            } catch (e2) {
+              // Not JSON, use default message
+            }
+          }
+        }
+        
         setMessages((prev) => [
           ...prev,
-          { id: (Date.now()+1).toString(), role: 'assistant', content: 'Sorry, I could not process that request.', timestamp: new Date() },
+          { 
+            id: (Date.now()+1).toString(), 
+            role: 'assistant', 
+            content: errorMessage, 
+            timestamp: new Date() 
+          },
         ]);
         console.error('[CHAT UI] Request failed:', res.status, text);
       }
@@ -550,6 +603,27 @@ if (Array.isArray(data.messages)) {
                 {message.content}
               </p>
               
+              {/* Clarification Questions */}
+              {message.role === 'assistant' && message.clarificationQuestion && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-medium text-[#8B5CF6] uppercase tracking-wide">Choose an option:</p>
+                  <div className="grid gap-2">
+                    {message.clarificationQuestion.options.map((option) => (
+                      <button
+                        key={option.id}
+                        onClick={() => handleClarificationResponse(option)}
+                        className="w-full text-left px-4 py-3 rounded-lg border-2 border-[#E8E8E6] hover:border-[#8B5CF6] hover:bg-[#8B5CF6]/5 transition-all text-sm font-medium text-[#1A1A1A] group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>{option.label}</span>
+                          <Send className="h-4 w-4 text-[#8B5CF6] opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
               {/* Try-on outfit image - larger and more prominent */}
               {message.role === 'assistant' && message.outfitImage && (
                 <div className="mt-4 overflow-hidden rounded-lg border border-[#E8E8E6] bg-gradient-to-br from-[#FAFAF8] to-[#F5F5F3] p-2">
@@ -570,36 +644,50 @@ if (Array.isArray(data.messages)) {
                 <div className="mt-4 space-y-2">
                   <p className="text-xs font-medium text-[#5A5A5A] uppercase tracking-wide font-light">Items in this outfit</p>
                   <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-                    {message.products.map((p, idx) => (
-                      <a
-                        key={idx}
-                        href={p.productUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group flex-shrink-0 w-[160px] border border-[#E8E8E6] rounded-lg overflow-hidden bg-white hover:shadow-lg hover:border-[#1A1A1A] transition-all shadow-sm"
-                      >
-                        <div className="relative w-full h-[140px] bg-[#FAFAF8]">
-                          <Image
-                            src={p.imageUrl}
-                            alt={p.name}
-                            fill
-                            className="object-contain p-2"
-                          />
-                        </div>
-                        <div className="p-3 space-y-1">
-                          <div className="text-xs font-medium text-[#5A5A5A] truncate font-light">{p.brand || p.retailer}</div>
-                          <div className="text-sm font-semibold text-[#1A1A1A] line-clamp-2 leading-snug">{p.name}</div>
-                          {p.price && p.price > 0 && (
-                            <div className="text-sm font-bold text-[#1A1A1A]">
-                              {p.currency === 'USD' ? '$' : p.currency === 'EUR' ? '€' : p.currency === 'GBP' ? '£' : ''}{p.price.toFixed(2)}
+                    {message.products.map((p, idx) => {
+                      if (p.imageUrl) {
+                        return (
+                          <a
+                            key={idx}
+                            href={p.productUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group flex-shrink-0 w-[160px] border border-[#E8E8E6] rounded-lg overflow-hidden bg-white hover:shadow-lg hover:border-[#1A1A1A] transition-all shadow-sm"
+                          >
+                            <div className="relative w-full h-[140px] bg-[#FAFAF8]">
+                              <Image
+                                src={p.imageUrl}
+                                alt={p.name}
+                                fill
+                                className="object-contain p-2"
+                                unoptimized={p.imageUrl?.includes('encrypted-tbn') || p.imageUrl?.includes('gstatic.com')}
+                              />
                             </div>
-                          )}
-                          <div className="flex items-center gap-1 text-xs text-[#1A1A1A] font-medium pt-1 group-hover:underline">
-                            View product <ExternalLink className="h-3 w-3" />
+                            <div className="p-3 space-y-1">
+                              <div className="text-xs font-medium text-[#5A5A5A] truncate font-light">{p.brand || p.retailer}</div>
+                              <div className="text-sm font-semibold text-[#1A1A1A] line-clamp-2 leading-snug">{p.name}</div>
+                              {p.price && p.price > 0 && (
+                                <div className="text-sm font-bold text-[#1A1A1A]">
+                                  {p.currency === 'USD' ? '$' : p.currency === 'EUR' ? '€' : p.currency === 'GBP' ? '£' : ''}{p.price.toFixed(2)}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1 text-xs text-[#1A1A1A] font-medium pt-1 group-hover:underline">
+                                View product <ExternalLink className="h-3 w-3" />
+                              </div>
+                            </div>
+                          </a>
+                        );
+                      } else {
+                        return (
+                          <div
+                            key={`placeholder-${idx}`}
+                            className="flex-shrink-0 w-[160px] border border-dashed border-[#E8E8E6] rounded-lg bg-gray-50 flex items-center justify-center text-xs text-gray-500"
+                          >
+                            Image unavailable
                           </div>
-                        </div>
-                      </a>
-                    ))}
+                        );
+                      }
+                    })}
                   </div>
                 </div>
               )}

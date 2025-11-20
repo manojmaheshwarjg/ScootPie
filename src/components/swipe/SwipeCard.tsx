@@ -85,7 +85,7 @@ export function SwipeCard({ product, tryOnImageUrl, onSwipe, onTap, style, isLoa
                 <span className="relative z-10">Try On</span>
               </button>
             )}
-            {imageError ? (
+            {imageError || !tryOnImageUrl && !product.imageUrl || (tryOnImageUrl || product.imageUrl) === '' ? (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
                 <div className="text-center p-6">
                   <div className="text-4xl mb-3">👕</div>
@@ -99,7 +99,7 @@ export function SwipeCard({ product, tryOnImageUrl, onSwipe, onTap, style, isLoa
                 fill
                 className="object-contain"
                 priority
-                unoptimized={tryOnImageUrl?.startsWith('data:')}
+                unoptimized={tryOnImageUrl?.startsWith('data:') || product.imageUrl?.includes('encrypted-tbn') || product.imageUrl?.includes('gstatic.com')}
                 onError={() => {
                   console.error(`Failed to load image for product ${product.id}: ${tryOnImageUrl || product.imageUrl}`);
                   setImageError(true);

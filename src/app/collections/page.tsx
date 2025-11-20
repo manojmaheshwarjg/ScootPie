@@ -146,6 +146,7 @@ export default function CollectionsPage() {
                   alt={item.product.name}
                   fill
                   className="object-cover"
+                  unoptimized={item.tryOnImageUrl?.startsWith('data:') || item.product.imageUrl?.includes('encrypted-tbn') || item.product.imageUrl?.includes('gstatic.com')}
                 />
                 {item.tryOnImageUrl && (
                   <div className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2 py-1 rounded-full text-[10px] font-medium text-[#1A1A1A] border border-[#E8E8E6]">

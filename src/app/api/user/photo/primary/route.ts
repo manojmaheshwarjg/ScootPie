@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
         id: primaryPhoto.id,
         url: primaryPhoto.url,
         isPrimary: primaryPhoto.isPrimary,
+        metadata: primaryPhoto.metadata, // Include metadata with outfit analysis
       },
     });
   } catch (error) {

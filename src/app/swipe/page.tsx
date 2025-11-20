@@ -23,6 +23,7 @@ function SwipePageContent() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [userPhotoUrl, setUserPhotoUrl] = useState<string | null>(null);
+  const [outfitAnalysis, setOutfitAnalysis] = useState<any>(null); // Store outfit analysis from photo
   const [tryOnImages, setTryOnImages] = useState<Map<string, string>>(new Map());
   const [generatingTryOns, setGeneratingTryOns] = useState<Set<string>>(new Set());
   const [hasPhoto, setHasPhoto] = useState(true);
@@ -37,7 +38,7 @@ function SwipePageContent() {
     setSelectedProduct,
   } = useStore();
 
-  // Fetch user's primary photo
+  // Fetch user's primary photo and outfit analysis
   const fetchUserPhoto = useCallback(async () => {
     try {
       const response = await fetch('/api/user/photo/primary');
@@ -46,15 +47,39 @@ function SwipePageContent() {
         if (data.success && data.photo) {
           setUserPhotoUrl(data.photo.url);
           setHasPhoto(true);
+          
+          // Extract and store outfit analysis from photo metadata
+          if (data.photo.metadata?.outfitAnalysis) {
+            const analysis = data.photo.metadata.outfitAnalysis;
+            console.log('[SWIPE] ===== OUTFIT ANALYSIS LOADED =====');
+            console.log('[SWIPE] Found outfit analysis:', {
+              itemCount: analysis.items.length,
+              items: analysis.items.map((i: any) => i.name),
+              zones: analysis.detectedZones,
+              confidence: analysis.confidence,
+              analyzedAt: analysis.analyzedAt,
+            });
+            console.log('[SWIPE] ===== END OUTFIT ANALYSIS =====');
+            setOutfitAnalysis(analysis);
+          } else {
+            console.warn('[SWIPE] ⚠️ No outfit analysis found in photo metadata');
+            console.warn('[SWIPE] ⚠️ Outfit analysis is required for try-on generation');
+            setOutfitAnalysis(null);
+            // Show user-friendly message
+            alert('Outfit analysis is required before generating try-ons. Please re-upload your photo to trigger outfit analysis.');
+          }
         } else {
           setHasPhoto(false);
+          setOutfitAnalysis(null);
         }
       } else {
         setHasPhoto(false);
+        setOutfitAnalysis(null);
       }
     } catch (error) {
       console.error('Failed to fetch user photo:', error);
       setHasPhoto(false);
+      setOutfitAnalysis(null);
     }
   }, []);
 
@@ -65,8 +90,22 @@ function SwipePageContent() {
     }
 
     if (!userPhotoUrl) {
+      console.warn('[SWIPE] Cannot generate try-on: No user photo available');
       return; // No user photo available
     }
+
+    // Check if outfit analysis is available (required for try-on)
+    if (!outfitAnalysis) {
+      console.warn('[SWIPE] ⚠️ Cannot generate try-on: Outfit analysis is required');
+      alert('Outfit analysis is required before generating try-ons. Please re-upload your photo from the profile page to trigger outfit analysis.');
+      return;
+    }
+
+    console.log('[SWIPE] Generating try-on with outfit analysis:', {
+      productId,
+      hasOutfitAnalysis: !!outfitAnalysis,
+      outfitItems: outfitAnalysis.items?.length || 0,
+    });
 
     setGeneratingTryOns(prev => new Set(prev).add(productId));
 
@@ -78,6 +117,13 @@ function SwipePageContent() {
 
       if (product.isExternal) {
         // Direct generation using image URL and user photo
+        // Include outfit analysis if available
+        if (outfitAnalysis) {
+          console.log('[SWIPE] Passing outfit analysis to try-on:', {
+            itemCount: outfitAnalysis.items.length,
+            zones: outfitAnalysis.detectedZones,
+          });
+        }
         const response = await fetch('/api/tryon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -86,6 +132,7 @@ function SwipePageContent() {
             productImageUrl: product.imageUrl,
             productName: product.name,
             productDescription: product.description,
+            outfitAnalysis: outfitAnalysis || undefined, // Pass outfit analysis if available
           }),
         });
         
@@ -145,7 +192,7 @@ function SwipePageContent() {
         return next;
       });
     }
-  }, [userPhotoUrl, tryOnImages, generatingTryOns, products]);
+  }, [userPhotoUrl, outfitAnalysis, tryOnImages, generatingTryOns, products]);
 
   // Pre-generate try-ons for upcoming products
   const pregenerateTryOns = useCallback(async (products: Product[], startIndex: number) => {
@@ -226,7 +273,12 @@ function SwipePageContent() {
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        setProducts(data.products);
+        // Filter out products without valid image URLs
+        const validProducts = data.products.filter((p: Product) => 
+          p.imageUrl && p.imageUrl.trim() !== '' && p.imageUrl !== 'undefined'
+        );
+        console.log(`[SWIPE] Filtered products: ${data.products.length} -> ${validProducts.length} (removed ${data.products.length - validProducts.length} without images)`);
+        setProducts(validProducts);
         setCurrentIndex(0);
         setTryOnImages(new Map());
         setGeneratingTryOns(new Set());
@@ -290,7 +342,12 @@ function SwipePageContent() {
         const response = await fetch('/api/products?count=15');
         if (response.ok) {
           const data = await response.json();
-          setProducts((prev) => [...prev, ...data.products]);
+          // Filter out products without valid image URLs
+          const validProducts = data.products.filter((p: Product) => 
+            p.imageUrl && p.imageUrl.trim() !== '' && p.imageUrl !== 'undefined'
+          );
+          console.log(`[SWIPE] Loaded more products: ${data.products.length} -> ${validProducts.length} (removed ${data.products.length - validProducts.length} without images)`);
+          setProducts((prev) => [...prev, ...validProducts]);
         }
       } catch (error) {
         console.error('Failed to load more products:', error);
@@ -314,11 +371,14 @@ function SwipePageContent() {
 
   // Auto-generate try-on for the current card (quota-friendly: current item only)
   useEffect(() => {
-    if (currentProduct && userPhotoUrl && !currentTryOnUrl && !isGeneratingTryOn) {
+    // Only generate try-on if we have both photo and outfit analysis
+    if (currentProduct && userPhotoUrl && outfitAnalysis && !currentTryOnUrl && !isGeneratingTryOn) {
       generateTryOn(currentProduct.id);
+    } else if (currentProduct && userPhotoUrl && !outfitAnalysis) {
+      console.warn('[SWIPE] Cannot auto-generate try-on: Outfit analysis missing');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProduct?.id, userPhotoUrl]);
+  }, [currentProduct?.id, userPhotoUrl, outfitAnalysis]);
 
   if (loading) {
     return (
@@ -373,6 +433,49 @@ function SwipePageContent() {
                 }}
               ></div>
               <span className="relative z-10">Upload Photos</span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <Navigation />
+      </>
+    );
+  }
+
+  // Check if outfit analysis is missing (required for try-on generation)
+  if (hasPhoto && userPhotoUrl && !outfitAnalysis) {
+    return (
+      <>
+      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-white via-[#8B5CF6]/5 to-white pb-16 lg:pb-0 lg:pl-56 relative overflow-hidden">
+        {/* Noise Background */}
+        <svg className="absolute inset-0 w-full h-full opacity-65 pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+          <filter id="noise-swipe-noanalysis">
+            <feTurbulence type="fractalNoise" baseFrequency="0.80" numOctaves="4" stitchTiles="stitch"/>
+            <feColorMatrix type="saturate" values="0"/>
+          </filter>
+          <rect width="100%" height="100%" filter="url(#noise-swipe-noanalysis)"/>
+        </svg>
+        <div className="text-center max-w-md px-4 relative z-10">
+          <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-xl border border-gray-200 p-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-3">Outfit Analysis Required</h2>
+            <p className="text-gray-600 mb-6 font-light">
+              Outfit analysis is required before generating try-on images. Please re-upload your photo from the profile page to trigger outfit analysis.
+            </p>
+            <a 
+              href="/profile" 
+              className="relative inline-flex bg-gradient-to-r from-[#8B5CF6]/90 to-[#7C3AED]/90 px-6 py-2.5 text-sm font-medium text-white rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-0.5 overflow-hidden group transition-all"
+              style={{
+                background: 'linear-gradient(90deg, rgba(139, 92, 246, 0.9), rgba(124, 58, 237, 0.9))',
+              }}
+            >
+              <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                style={{
+                  background: 'linear-gradient(90deg, #8B5CF6, #7C3AED, #8B5CF6)',
+                  backgroundSize: '200% 100%',
+                  animation: 'shimmer 2s linear infinite'
+                }}
+              ></div>
+              <span className="relative z-10">Go to Profile</span>
             </a>
           </div>
         </div>
