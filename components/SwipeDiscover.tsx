@@ -1,6 +1,7 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { Heart, X, ShoppingBag, Loader2, ExternalLink, RefreshCw } from 'lucide-react';
 import { Product, TryOnResult } from '../types';
 import { getDiscoverQueue, generateTryOnImage } from '../services/gemini';
@@ -214,7 +215,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
             >
                 {/* Back cards use placeholder if no image */}
                 {item.imageUrl ? (
-                    <img src={item.imageUrl} className="w-full h-full object-cover opacity-60 grayscale" />
+                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover opacity-60 grayscale" />
                 ) : (
                     <div className="w-full h-full bg-zinc-800 flex items-center justify-center opacity-30">
                         <ShoppingBag className="w-12 h-12 text-gray-500" />
@@ -256,8 +257,8 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                      {recentMatches.length > 0 && (
                         <div className="flex -space-x-3 pl-1">
                              {recentMatches.slice(0, 4).map(m => (
-                                 <div key={m.id} className="w-8 h-8 rounded-full border border-black bg-zinc-800 overflow-hidden shadow-sm">
-                                     <img src={m.imageUrl} className="w-full h-full object-cover" />
+                                 <div key={m.id} className="relative w-8 h-8 rounded-full border border-black bg-zinc-800 overflow-hidden shadow-sm">
+                                     <Image src={m.imageUrl} alt={m.product.name} fill className="object-cover" />
                                  </div>
                              ))}
                         </div>
@@ -329,11 +330,12 @@ const CardContent = ({ item, image, feedback, isGenerating }: CardContentProps) 
     <div className="relative w-full h-full bg-zinc-900">
         {/* Full Bleed Image */}
         {(image || item.imageUrl) ? (
-            <img 
-                src={image || item.imageUrl} 
+            <Image
+                src={image || item.imageUrl}
                 alt={item.name}
-                className={`w-full h-full object-cover pointer-events-none transition-opacity duration-500 ${isGenerating ? 'opacity-50' : 'opacity-100'}`}
-                draggable="false"
+                fill
+                className={`object-cover pointer-events-none transition-opacity duration-500 ${isGenerating ? 'opacity-50' : 'opacity-100'}`}
+                draggable={false}
             />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800 p-8 text-center">

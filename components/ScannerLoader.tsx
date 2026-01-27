@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 interface ScannerLoaderProps {
   imageUrl?: string;
@@ -16,7 +17,7 @@ export const ScannerLoader: React.FC<ScannerLoaderProps> = ({ imageUrl, text = "
         {/* Optional: Render the image inside if provided (for standalone usage), otherwise parent handles background */}
         {imageUrl && (
             <div className="absolute inset-0 z-0">
-                <img src={imageUrl} className="w-full h-full object-cover opacity-50" />
+                <Image src={imageUrl} alt="Processing image" fill className="object-cover opacity-50" />
             </div>
         )}
 

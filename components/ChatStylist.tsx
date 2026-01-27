@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { Loader2, Plus, ArrowRight, MessageCircle, ExternalLink, Mic, Search, ChevronRight, Check, Download, Layers, X, ShoppingBag, Trash2, PlusCircle, Shirt, History, Menu, SidebarClose } from 'lucide-react';
 import { ChatMessage, Product, OutfitState, TryOnResult, ProductCategory, ChatSession } from '../types';
 import { chatWithStylist, analyzeClosetFit, searchProducts, generateTryOnImage } from '../services/gemini';
@@ -571,7 +572,7 @@ export const ChatStylist: React.FC<ChatStylistProps> = ({
                         <div className="mb-2 flex flex-wrap gap-2 justify-end">
                             {msg.userAttachments.map((item, idx) => (
                                 <div key={idx} className="relative group/att bg-zinc-900 rounded-lg overflow-hidden border border-white/20 w-24 h-24">
-                                    <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover opacity-70 group-hover/att:opacity-100 transition-opacity" />
+                                    <Image src={item.imageUrl} alt={item.name} fill className="object-cover opacity-70 group-hover/att:opacity-100 transition-opacity" />
                                     <div className="absolute inset-0 flex items-end p-1 bg-gradient-to-t from-black/80 to-transparent">
                                         <span className="text-[8px] font-mono truncate w-full text-white">{item.name}</span>
                                     </div>
@@ -623,7 +624,7 @@ export const ChatStylist: React.FC<ChatStylistProps> = ({
                                     return (
                                         <div key={result.id} className={`bg-black rounded-lg overflow-hidden border transition-all ${isSelected ? 'border-accent ring-1 ring-accent' : 'border-white/10'}`}>
                                             <div className="aspect-[3/4] relative">
-                                                <img src={result.imageUrl} className="w-full h-full object-cover" />
+                                                <Image src={result.imageUrl} alt={result.product.name} fill className="object-cover" />
                                                 <button onClick={() => handleSelect(result)} className="absolute bottom-2 right-2 p-2 bg-black/60 backdrop-blur rounded-full text-white hover:bg-accent transition-colors">
                                                     {isSelected ? <Check className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
                                                 </button>
@@ -656,7 +657,7 @@ export const ChatStylist: React.FC<ChatStylistProps> = ({
                   <div className="absolute bottom-full left-0 right-0 p-4 bg-zinc-900 border-t border-white/10 flex gap-4 overflow-x-auto">
                       {stagedAttachments.map((item, i) => (
                           <div key={i} className="relative w-16 h-16 flex-shrink-0 bg-black rounded border border-white/20 group">
-                              <img src={item.imageUrl} className="w-full h-full object-cover opacity-80" />
+                              <Image src={item.imageUrl} alt={item.name} fill className="object-cover opacity-80" />
                               <button 
                                 onClick={() => setStagedAttachments(prev => prev.filter(p => p.id !== item.id))}
                                 className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -707,9 +708,11 @@ export const ChatStylist: React.FC<ChatStylistProps> = ({
                                     className="group relative aspect-[3/4] bg-black border border-white/10 rounded-md overflow-hidden hover:border-accent transition-all hover:shadow-[0_0_15px_rgba(249,115,22,0.15)]"
                                   >
                                       {/* Image */}
-                                      <img 
-                                        src={item.imageUrl} 
-                                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 opacity-80 group-hover:opacity-100" 
+                                      <Image
+                                        src={item.imageUrl}
+                                        alt={item.name}
+                                        fill
+                                        className="object-cover transition-transform duration-500 group-hover:scale-110 opacity-80 group-hover:opacity-100"
                                       />
                                       
                                       {/* Info Overlay */}

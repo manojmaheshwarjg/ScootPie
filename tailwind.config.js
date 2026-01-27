@@ -11,8 +11,9 @@ module.exports = {
         accent: "#f97316",
       },
       fontFamily: {
-        serif: ["Playfair Display", "serif"],
-        mono: ["Space Mono", "monospace"],
+        sans: ['var(--font-inter)', 'Inter', 'sans-serif'],
+        serif: ['var(--font-playfair)', 'Playfair Display', 'serif'],
+        mono: ['var(--font-space-mono)', 'Space Mono', 'monospace'],
       },
     },
   },

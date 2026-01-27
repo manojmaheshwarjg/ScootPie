@@ -1,6 +1,7 @@
 
 
 import React, { useState, useRef } from 'react';
+import Image from 'next/image';
 import { Upload, Zap, ExternalLink, RefreshCw, ShoppingBag, Loader2, Shirt, ArrowUp, ArrowDown, Layers } from 'lucide-react';
 import { analyzeInspirationImage, generateStealTheLook } from '../services/gemini';
 import { InspirationAnalysis, TryOnResult, Product } from '../types';
@@ -171,7 +172,7 @@ export const InspirationScanner: React.FC<InspirationScannerProps> = ({ userPhot
                  <div className="flex-1 flex relative">
                      {/* Original Inspo */}
                      <div className="w-1/2 h-full relative border-r border-white/10 group overflow-hidden">
-                         <img src={inspoImage} className="w-full h-full object-cover" />
+                         <Image src={inspoImage} alt="Inspiration" fill className="object-cover" />
                          <div className="absolute top-4 left-4 bg-black/60 backdrop-blur px-3 py-1 rounded-full border border-white/10 z-10">
                              <span className="font-mono text-[9px] uppercase tracking-widest text-white">Reference</span>
                          </div>
@@ -192,7 +193,7 @@ export const InspirationScanner: React.FC<InspirationScannerProps> = ({ userPhot
                          ) : generatedTryOn ? (
                              // SUCCESS STATE
                              <>
-                                <img src={generatedTryOn} className="w-full h-full object-cover animate-in fade-in zoom-in-95 duration-700" />
+                                <Image src={generatedTryOn} alt="Generated try-on" fill className="object-cover animate-in fade-in zoom-in-95 duration-700" />
                                 <div className="absolute top-4 right-4 bg-accent text-white px-3 py-1 rounded-full border border-accent shadow-lg z-20">
                                     <span className="font-mono text-[9px] uppercase tracking-widest font-bold">You</span>
                                 </div>
@@ -202,7 +203,7 @@ export const InspirationScanner: React.FC<InspirationScannerProps> = ({ userPhot
                              <div className="absolute inset-0 bg-zinc-900 flex flex-col">
                                  {/* Background User Image (Dimmed) */}
                                  <div className="absolute inset-0 opacity-40">
-                                     <img src={userPhoto} className="w-full h-full object-cover grayscale" />
+                                     <Image src={userPhoto} alt="User photo" fill className="object-cover grayscale" />
                                  </div>
                                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
                                  

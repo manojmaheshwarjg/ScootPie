@@ -1,6 +1,7 @@
 
 
 import React, { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
 import { Camera, ArrowRight, Check, Video, X, Chrome, ChevronLeft } from 'lucide-react';
 import { UserPhoto } from '../types';
 
@@ -251,7 +252,9 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({ onPhotoUploaded, o
                     
                     <div className="h-[420px] bg-black/60 backdrop-blur-md border-2 border-white/10 p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)] flex flex-col justify-center space-y-3">
                          <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-4">
-                             <img src={tempPhotoData!} alt="Preview" className="w-12 h-12 rounded-full object-cover border border-white/20" />
+                             <div className="relative w-12 h-12 rounded-full overflow-hidden border border-white/20">
+                                 <Image src={tempPhotoData!} alt="Preview" fill className="object-cover" />
+                             </div>
                              <div className="flex-1">
                                 <p className="font-serif text-lg text-white">Image Acquired.</p>
                                 <button onClick={() => setTempPhotoData(null)} className="text-[10px] font-mono uppercase underline text-gray-500 hover:text-white">Reset Source</button>

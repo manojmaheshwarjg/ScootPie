@@ -1,4 +1,5 @@
 import React, { useState, useRef, Suspense, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { OrbitControls, Grid, Stars, Float, useVideoTexture, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -387,7 +388,7 @@ export const ThreeDView: React.FC<ThreeDViewProps> = ({ generatedLooks, onUpdate
                             {selectedLookId === look.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent"></div>}
                             
                             <div className="w-12 h-16 bg-zinc-900 rounded-sm overflow-hidden relative border border-white/10">
-                                <img src={look.imageUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                <Image src={look.imageUrl} alt={look.imageUrl} fill className="object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                 {look.videoUrl && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
                                         <Rotate3d className="w-4 h-4 text-white" />

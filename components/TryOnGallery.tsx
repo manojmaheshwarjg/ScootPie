@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import Image from 'next/image';
 import { ExternalLink, ChevronLeft, ChevronRight, Check, Shirt, Video, Loader2, Play } from 'lucide-react';
 import { TryOnResult, Product } from '../types';
 import { ScannerLoader } from './ScannerLoader';
@@ -116,14 +117,15 @@ export const TryOnGallery: React.FC<TryOnGalleryProps> = ({
                              ) : (
                                  <>
                                     {/* Base Image */}
-                                    <div 
+                                    <div
                                         className="absolute inset-0 bg-cover bg-center blur-md opacity-30 scale-110"
                                         style={{ backgroundImage: `url(${result.imageUrl})` }}
                                     />
-                                    <img 
-                                        src={result.imageUrl} 
-                                        alt={result.product.name} 
-                                        className="relative w-full h-full object-contain z-10"
+                                    <Image
+                                        src={result.imageUrl}
+                                        alt={result.product.name}
+                                        fill
+                                        className="relative object-contain z-10"
                                     />
                                     
                                     {/* OVERLAY: Scanner Loader when Generating Video */}

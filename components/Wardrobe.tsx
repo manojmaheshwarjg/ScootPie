@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import Image from 'next/image';
 import { TryOnResult, Product, ProductCategory } from '../types';
 import { X, ArrowUpRight, Plus, Check, Shirt, Sparkles, Trash2 } from 'lucide-react';
 import { analyzeClosetItem } from '../services/gemini';
@@ -175,10 +176,11 @@ export const Wardrobe: React.FC<WardrobeProps> = ({
                             `}
                         >
                              <div className="aspect-square relative overflow-hidden p-6 bg-zinc-900/20">
-                                <img 
-                                    src={item.imageUrl} 
+                                <Image
+                                    src={item.imageUrl}
                                     alt={item.name}
-                                    className={`w-full h-full object-contain drop-shadow-xl transition-transform duration-500 ${isSelected ? 'scale-90' : 'group-hover:scale-110'}`}
+                                    fill
+                                    className={`object-contain drop-shadow-xl transition-transform duration-500 ${isSelected ? 'scale-90' : 'group-hover:scale-110'}`}
                                 />
                                 
                                 {/* Indicators & Overlays */}
@@ -257,10 +259,11 @@ export const Wardrobe: React.FC<WardrobeProps> = ({
                     {savedItems.map((item) => (
                     <div key={item.id} className="group relative flex flex-col bg-black/60 backdrop-blur-sm h-full hover:bg-black/80 transition-colors">
                         <div className="aspect-[3/4] relative overflow-hidden bg-zinc-900/50">
-                        <img 
-                            src={item.imageUrl} 
+                        <Image
+                            src={item.imageUrl}
                             alt={item.product.name}
-                            className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500 opacity-80 group-hover:opacity-100" 
+                            fill
+                            className="object-cover grayscale group-hover:grayscale-0 transition-all duration-500 opacity-80 group-hover:opacity-100"
                         />
                         <button 
                             onClick={() => onRemoveLook(item.id)}
