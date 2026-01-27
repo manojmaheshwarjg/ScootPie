@@ -2,7 +2,6 @@ import React from 'react';
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from 'sonner';
-// Force rebuild for Tailwind CSS processing
 
 export const metadata: Metadata = {
   title: "ScootPie - AI Virtual Stylist",
