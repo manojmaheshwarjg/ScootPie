@@ -1,6 +1,6 @@
 {
   "name": "scootpie-next",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31,8 +31,8 @@
     "@types/react-dom": "^18.2.19",
     "@types/three": "^0.160.0",
     "autoprefixer": "^10.4.17",
-    "eslint": "^9.39.2",
-    "eslint-config-next": "^16.1.5",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "14.1.0",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3"
