@@ -126,7 +126,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, onSkip }) => {
                <div className="space-y-6">
                   <div>
                       <h3 className="font-serif text-2xl text-white">Magic Link</h3>
-                      <p className="text-gray-500 text-sm mt-1">We'll send you a login link.</p>
+                      <p className="text-gray-500 text-sm mt-1">We&apos;ll send you a login link.</p>
                   </div>
                   
                   {message ? (

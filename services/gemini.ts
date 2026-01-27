@@ -1,11 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { Buffer } from "buffer";
 import { Product, ProductCategory, InspirationAnalysis } from '../types';
 import { logger } from '../lib/logger';
 import { rateLimit, isSafeUrl, sanitizeInput } from '../lib/security';
 import { redis } from '../lib/redis';
 
-const getAI = () => new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const getAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const SEARCHAPI_API_KEY: string = "Z9F2zoDAZX329hJGk3eoSfpt"; 
 
@@ -355,7 +355,7 @@ export const checkRunwayVideoStatus = async (operationJson: string): Promise<{ s
                 // Client-side fetch proxy: Fetch blob using API key and return base64 data URI
                 // This replaces the server-side proxy which cannot run in this environment
                 try {
-                    const res = await fetch(`${uri}&key=${process.env.API_KEY}`);
+                    const res = await fetch(`${uri}&key=${process.env.GEMINI_API_KEY}`);
                     if (res.ok) {
                         const blob = await res.blob();
                         const reader = new FileReader();
@@ -408,7 +408,7 @@ export const generate360View = async (imageBase64: string): Promise<string | nul
       const uri = operation.response?.generatedVideos?.[0]?.video?.uri;
       if (uri) {
          // Client-side fetch proxy
-         const res = await fetch(`${uri}&key=${process.env.API_KEY}`);
+         const res = await fetch(`${uri}&key=${process.env.GEMINI_API_KEY}`);
          if (res.ok) {
             const blob = await res.blob();
             const reader = new FileReader();

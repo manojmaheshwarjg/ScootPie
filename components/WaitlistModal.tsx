@@ -97,13 +97,13 @@ export const WaitlistModal: React.FC<WaitlistModalProps> = ({ isOpen, onClose })
             <p className="font-mono text-xs text-accent uppercase tracking-widest mb-6 border-b border-accent/20 pb-1">Chrome Extension Beta</p>
             
             <p className="text-gray-300 text-sm leading-relaxed mb-8 max-w-[280px]">
-                We're building the ultimate tool to let you shop and try on clothes from <span className="text-white font-bold underline decoration-accent/50 underline-offset-2">any store</span> across the internet instantly.
+                We&apos;re building the ultimate tool to let you shop and try on clothes from <span className="text-white font-bold underline decoration-accent/50 underline-offset-2">any store</span> across the internet instantly.
             </p>
 
             {isSubmitted ? (
                 <div className="w-full py-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-lg font-mono text-xs uppercase tracking-widest flex items-center justify-center gap-3 animate-in fade-in slide-in-from-bottom-2">
                     <div className="w-3 h-3 bg-accent rounded-[1px] shadow-[0_0_5px_rgba(249,115,22,0.5)] rotate-12"></div>
-                    <span>You're on the list!</span>
+                    <span>You&apos;re on the list!</span>
                 </div>
             ) : (
                 <form onSubmit={handleSubmit} className="w-full space-y-3">
