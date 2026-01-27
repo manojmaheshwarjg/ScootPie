@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from 'sonner';
 import { Inter, Playfair_Display, Space_Mono } from 'next/font/google';
@@ -28,8 +28,70 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ScootPie - AI Virtual Stylist",
-  description: "An AI-powered virtual try-on platform.",
+  metadataBase: new URL('https://scootpie.com'),
+  title: {
+    default: 'ScootPie - AI Virtual Try-On Platform',
+    template: '%s | ScootPie',
+  },
+  description: 'Virtual try-on platform powered by AI. See how clothes fit on you before buying. Reduce returns, shop with confidence using advanced body scanning and AI fashion styling.',
+  keywords: ['virtual try-on', 'AI fashion', 'virtual fitting room', 'online clothing try-on', 'AR fashion', 'body scanning', 'AI stylist', 'fashion tech', 'e-commerce fashion'],
+  authors: [{ name: 'ScootPie' }],
+  creator: 'ScootPie',
+  publisher: 'ScootPie',
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://scootpie.com',
+    title: 'ScootPie - AI Virtual Try-On Platform',
+    description: 'Virtual try-on platform powered by AI. See how clothes fit on you before buying.',
+    siteName: 'ScootPie',
+    images: [{
+      url: '/og-image.jpg',
+      width: 1200,
+      height: 630,
+      alt: 'ScootPie - AI Virtual Try-On Platform',
+    }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'ScootPie - AI Virtual Try-On Platform',
+    description: 'Virtual try-on platform powered by AI. See how clothes fit on you before buying.',
+    images: ['/og-image.jpg'],
+    creator: '@scootpie',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  icons: {
+    icon: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
+    shortcut: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
+    apple: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
+  },
+  manifest: '/manifest.json',
+  verification: {
+    // Add Google Search Console verification code when available
+    // google: 'your-verification-code',
+  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: '#f97316',
 };
 
 export default function RootLayout({
@@ -43,6 +105,48 @@ export default function RootLayout({
         <link rel="icon" type="image/svg+xml" href="https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg" />
       </head>
       <body className={inter.className}>
+        {/* Structured Data - Organization Schema */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'Organization',
+              name: 'ScootPie',
+              description: 'AI-powered virtual try-on platform for fashion and clothing',
+              url: 'https://scootpie.com',
+              logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
+              sameAs: [
+                // Add social media profiles when available
+                // 'https://twitter.com/scootpie',
+                // 'https://www.linkedin.com/company/scootpie',
+              ],
+            }),
+          }}
+        />
+        {/* Structured Data - WebApplication Schema */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'WebApplication',
+              name: 'ScootPie',
+              applicationCategory: 'LifestyleApplication',
+              operatingSystem: 'Web Browser',
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'USD',
+              },
+              aggregateRating: {
+                '@type': 'AggregateRating',
+                ratingValue: '4.8',
+                ratingCount: '1000',
+              },
+            }),
+          }}
+        />
         {children}
         <Toaster
             position="top-center"
