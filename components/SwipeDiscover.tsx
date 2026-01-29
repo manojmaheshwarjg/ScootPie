@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { Heart, X, ShoppingBag, Loader2, ExternalLink, RefreshCw } from 'lucide-react';
 import { Product, TryOnResult } from '../types';
-import { getDiscoverQueue, generateTryOnImage } from '../services/gemini';
+import { getDiscoverQueue, generateTryOnImage } from '../services/gemini-client';
 import { ScannerLoader } from './ScannerLoader';
 
 interface SwipeDiscoverProps {
@@ -20,7 +20,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
     const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
     const [dragDelta, setDragDelta] = useState({ x: 0, y: 0 });
     const [currentIndex, setCurrentIndex] = useState(0);
-    
+
     // Cache for generated try-on images: { [productId]: base64String }
     const [generatedCache, setGeneratedCache] = useState<Record<string, string>>({});
     const [generatingId, setGeneratingId] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
     useEffect(() => {
         const triggerGeneration = async () => {
             if (!userPhoto || queue.length === 0) return;
-            
+
             const currentItem = queue[currentIndex];
             if (!currentItem) return;
 
@@ -65,7 +65,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
 
             setGeneratingId(currentItem.id);
             console.log(`[Discover] Generating try-on for card: ${currentItem.name}`);
-            
+
             try {
                 // Generate Try-On for the current card
                 const img = await generateTryOnImage(userPhoto, [currentItem]);
@@ -94,7 +94,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
         if (!dragStart) return;
         const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-        
+
         const deltaX = clientX - dragStart.x;
         const deltaY = clientY - dragStart.y;
         setDragDelta({ x: deltaX, y: deltaY });
@@ -107,7 +107,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
 
     const handleTouchEnd = () => {
         if (!dragStart) return;
-        
+
         const threshold = 100;
         if (dragDelta.x > threshold) {
             confirmSwipe('RIGHT');
@@ -123,11 +123,11 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
 
     const confirmSwipe = (direction: 'LEFT' | 'RIGHT') => {
         setFeedback(direction === 'RIGHT' ? 'LIKE' : 'NOPE');
-        
+
         // Animate off screen
         const endX = direction === 'RIGHT' ? 1000 : -1000;
         setDragDelta({ x: endX, y: dragDelta.y }); // Keep Y momentum
-        
+
         setTimeout(() => {
             if (direction === 'RIGHT') {
                 const item = queue[currentIndex];
@@ -138,7 +138,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
             }
             // Advance queue
             setCurrentIndex(prev => prev + 1);
-            
+
             // Reset state for next card
             setDragDelta({ x: 0, y: 0 });
             setFeedback(null);
@@ -152,7 +152,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
         if (!item) return null;
 
         const stackOffset = index - currentIndex; // 0, 1, 2...
-        
+
         // Top card follows gestures
         if (isTopCard) {
             const rotate = dragDelta.x * 0.05;
@@ -161,10 +161,10 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
             const isGenerating = generatingId === item.id;
 
             return (
-                <div 
+                <div
                     key={item.id}
                     className="absolute inset-0 bg-zinc-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden cursor-grab active:cursor-grabbing select-none z-30"
-                    style={{ 
+                    style={{
                         transform: `translate(${dragDelta.x}px, ${dragDelta.y}px) rotate(${rotate}deg)`,
                         transition: dragStart ? 'none' : 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
                         touchAction: 'none' // Important to prevent page scroll while dragging card
@@ -177,10 +177,10 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                 >
-                    <CardContent 
-                        item={item} 
+                    <CardContent
+                        item={item}
                         image={displayImage}
-                        feedback={feedback} 
+                        feedback={feedback}
                         isGenerating={isGenerating}
                     />
                 </div>
@@ -191,22 +191,22 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
         // Alternating Left/Right fanning
         const isLeft = stackOffset % 2 !== 0; // Odd = Left, Even = Right (relative to top)
         const fanDir = isLeft ? -1 : 1;
-        
+
         // More pronounced rotation and translation for "hand of cards" look
-        const rotate = 6 * stackOffset * fanDir; 
+        const rotate = 6 * stackOffset * fanDir;
         const translateX = 40 * stackOffset * fanDir;
-        const translateY = 5 * stackOffset; 
+        const translateY = 5 * stackOffset;
 
         // Scale down slightly to add depth
         const scale = 1 - (stackOffset * 0.05);
-        
+
         const opacity = 1 - (stackOffset * 0.1);
 
         return (
-            <div 
+            <div
                 key={item.id}
                 className="absolute inset-0 bg-zinc-800 border border-white/5 rounded-3xl shadow-xl overflow-hidden pointer-events-none transition-all duration-500 ease-out"
-                style={{ 
+                style={{
                     transform: `translate(${translateX}px, ${translateY}px) rotate(${rotate}deg) scale(${scale})`,
                     zIndex: 30 - stackOffset,
                     opacity: opacity,
@@ -229,20 +229,20 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
         return (
             <>
                 <div className="absolute inset-0 bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden z-30 animate-pulse">
-                     <div className="w-full h-3/4 bg-zinc-800/50" />
-                     <div className="p-6 space-y-3">
-                         <div className="h-6 w-2/3 bg-zinc-800 rounded" />
-                         <div className="h-4 w-1/3 bg-zinc-800 rounded" />
-                     </div>
-                     <div className="absolute inset-0 flex items-center justify-center">
-                         <Loader2 className="w-8 h-8 text-white/20 animate-spin" />
-                     </div>
+                    <div className="w-full h-3/4 bg-zinc-800/50" />
+                    <div className="p-6 space-y-3">
+                        <div className="h-6 w-2/3 bg-zinc-800 rounded" />
+                        <div className="h-4 w-1/3 bg-zinc-800 rounded" />
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-white/20 animate-spin" />
+                    </div>
                 </div>
             </>
         )
     };
 
-    const visibleQueue = queue.slice(currentIndex, currentIndex + 4); 
+    const visibleQueue = queue.slice(currentIndex, currentIndex + 4);
     const isQueueEmpty = visibleQueue.length === 0;
 
     return (
@@ -253,14 +253,14 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
 
             {/* FLOATING MATCHES BADGE (Bottom Right) */}
             <div className="fixed bottom-8 right-8 z-[60] flex flex-col items-end gap-2 pointer-events-none">
-                 <div className="flex items-center gap-3 pointer-events-auto bg-black/60 backdrop-blur-md p-1.5 rounded-full border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] hover:bg-zinc-900/80 transition-colors cursor-pointer">
-                     {recentMatches.length > 0 && (
+                <div className="flex items-center gap-3 pointer-events-auto bg-black/60 backdrop-blur-md p-1.5 rounded-full border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] hover:bg-zinc-900/80 transition-colors cursor-pointer">
+                    {recentMatches.length > 0 && (
                         <div className="flex -space-x-3 pl-1">
-                             {recentMatches.slice(0, 4).map(m => (
-                                 <div key={m.id} className="relative w-8 h-8 rounded-full border border-black bg-zinc-800 overflow-hidden shadow-sm">
-                                     <Image src={m.imageUrl} alt={m.product.name} fill className="object-cover" />
-                                 </div>
-                             ))}
+                            {recentMatches.slice(0, 4).map(m => (
+                                <div key={m.id} className="relative w-8 h-8 rounded-full border border-black bg-zinc-800 overflow-hidden shadow-sm">
+                                    <Image src={m.imageUrl} alt={m.product.name} fill className="object-cover" />
+                                </div>
+                            ))}
                         </div>
                     )}
                     <div className="h-8 px-4 bg-white text-black rounded-full flex items-center justify-center font-mono text-xs font-bold uppercase tracking-wide">
@@ -276,13 +276,13 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                         renderSkeletonStack()
                     ) : isQueueEmpty && !isLoading ? (
                         <div className="text-center absolute inset-0 flex flex-col items-center justify-center z-40">
-                             <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
-                                 <RefreshCw className="w-6 h-6 text-gray-500" />
-                             </div>
-                             <h3 className="text-xl font-serif text-white">Queue Empty</h3>
-                             <button onClick={loadMoreItems} className="mt-4 px-6 py-2 bg-white text-black text-xs font-mono uppercase tracking-widest rounded-full hover:bg-accent hover:text-white transition-colors">
-                                 Fetch More
-                             </button>
+                            <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
+                                <RefreshCw className="w-6 h-6 text-gray-500" />
+                            </div>
+                            <h3 className="text-xl font-serif text-white">Queue Empty</h3>
+                            <button onClick={loadMoreItems} className="mt-4 px-6 py-2 bg-white text-black text-xs font-mono uppercase tracking-widest rounded-full hover:bg-accent hover:text-white transition-colors">
+                                Fetch More
+                            </button>
                         </div>
                     ) : (
                         // Render Stack (Reverse order for correct z-indexing)
@@ -294,10 +294,10 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                     )}
                 </div>
 
-                 {/* BOTTOM CONTROLS */}
+                {/* BOTTOM CONTROLS */}
                 <div className="flex justify-center gap-8 z-50 items-center">
                     {/* REJECT (Left) */}
-                    <button 
+                    <button
                         onClick={() => confirmSwipe('LEFT')}
                         disabled={isQueueEmpty}
                         className="group w-16 h-16 rounded-full bg-black border border-white/20 text-gray-400 flex items-center justify-center hover:scale-110 hover:bg-zinc-800 hover:text-white hover:border-white transition-all shadow-xl disabled:opacity-50"
@@ -306,7 +306,7 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                     </button>
 
                     {/* ACCEPT (Right) - Accent Colored - Now Heart */}
-                    <button 
+                    <button
                         onClick={() => confirmSwipe('RIGHT')}
                         disabled={isQueueEmpty}
                         className="group w-16 h-16 rounded-full bg-black border-2 border-accent text-accent flex items-center justify-center hover:scale-110 hover:bg-accent hover:text-white transition-all shadow-[0_0_20px_rgba(249,115,22,0.3)] disabled:opacity-50"
@@ -339,22 +339,22 @@ const CardContent = ({ item, image, feedback, isGenerating }: CardContentProps) 
             />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-800 p-8 text-center">
-                 <ShoppingBag className="w-16 h-16 mb-4 text-gray-600" />
-                 <p className="font-mono text-xs uppercase text-gray-400">Preview Unavailable</p>
-                 {isGenerating && <p className="font-mono text-[10px] text-accent mt-2 animate-pulse">Generating...</p>}
+                <ShoppingBag className="w-16 h-16 mb-4 text-gray-600" />
+                <p className="font-mono text-xs uppercase text-gray-400">Preview Unavailable</p>
+                {isGenerating && <p className="font-mono text-[10px] text-accent mt-2 animate-pulse">Generating...</p>}
             </div>
         )}
-        
+
         {/* Generating Overlay */}
         {isGenerating && (
-             <div className="absolute inset-0 z-20">
-                 <ScannerLoader 
-                    text="SYNTHESIZING FIT..." 
+            <div className="absolute inset-0 z-20">
+                <ScannerLoader
+                    text="SYNTHESIZING FIT..."
                     className="w-full h-full"
-                 />
-             </div>
+                />
+            </div>
         )}
-        
+
         {/* Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-90" />
 
@@ -381,25 +381,25 @@ const CardContent = ({ item, image, feedback, isGenerating }: CardContentProps) 
                 <p className="font-mono text-[10px] text-accent uppercase tracking-widest mb-1">{item.brand}</p>
                 <h3 className="font-serif text-3xl text-white leading-none drop-shadow-md">{item.name}</h3>
             </div>
-            
+
             <p className="text-gray-400 text-xs line-clamp-2 mt-2 mb-4 font-light leading-relaxed opacity-80">
                 {item.description}
             </p>
 
             {/* Card Actions (Hyperlink) */}
             <div className="flex gap-2">
-                 <a 
-                    href={item.url} 
-                    target="_blank" 
+                <a
+                    href={item.url}
+                    target="_blank"
                     rel="noopener"
                     className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white hover:text-black border border-white/10 rounded-full backdrop-blur-md text-[10px] font-mono uppercase tracking-wider text-white transition-colors"
                     // Prevent drag/swipe when clicking link
                     onMouseDown={(e) => e.stopPropagation()}
                     onTouchStart={(e) => e.stopPropagation()}
-                 >
-                     <ExternalLink className="w-3 h-3" />
-                     View Source
-                 </a>
+                >
+                    <ExternalLink className="w-3 h-3" />
+                    View Source
+                </a>
             </div>
         </div>
     </div>

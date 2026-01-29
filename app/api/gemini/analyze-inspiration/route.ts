@@ -1,0 +1,28 @@
+import { NextResponse } from 'next/server';
+import { analyzeInspirationImage } from '@/services/gemini';
+
+export async function POST(request: Request) {
+    try {
+        const { base64Image } = await request.json();
+
+        if (!base64Image) {
+            return NextResponse.json(
+                { error: 'base64Image is required' },
+                { status: 400 }
+            );
+        }
+
+        const result = await analyzeInspirationImage(base64Image);
+
+        return NextResponse.json({
+            success: true,
+            analysis: result
+        });
+    } catch (error) {
+        console.error('Analyze inspiration API error:', error);
+        return NextResponse.json(
+            { error: 'Failed to analyze inspiration image' },
+            { status: 500 }
+        );
+    }
+}
