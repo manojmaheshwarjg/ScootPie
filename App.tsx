@@ -12,6 +12,7 @@ import { SwipeDiscover } from './components/SwipeDiscover';
 import { ThreeDView } from './components/ThreeDView';
 import { ApiKeyBanner } from './components/ApiKeyBanner';
 import { AuthScreen } from './components/AuthScreen';
+import { ProfileSettings } from './components/ProfileSettings';
 import { AppView, UserPhoto, TryOnResult, OutfitState, ProductCategory, Product } from './types';
 import { enhanceUserPhoto, startRunwayVideo, checkRunwayVideoStatus, generateTryOnImage } from './services/gemini-client';
 import { ScannerLoader } from './components/ScannerLoader';
@@ -87,6 +88,7 @@ function App() {
   const [closetItems, setClosetItems] = useState<Product[]>([]);
   const [closetAnalysisQueue, setClosetAnalysisQueue] = useState<Product[]>([]);
   const [isWaitlistOpen, setIsWaitlistOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const fetchUserData = async (userId: string) => {
     if (!supabase) return;
@@ -107,7 +109,14 @@ function App() {
       if (wardrobe) setClosetItems(wardrobe.map(w => w.product_json));
 
       const { data: looks } = await supabase.from('generated_looks').select('*').eq('user_id', userId);
-      if (looks) setSavedItems(looks.map(l => l.result_json));
+      if (looks) {
+        const mappedLooks = looks.map(l => l.result_json);
+        setGeneratedLooks(mappedLooks); // Load ALL history into Gallery
+
+        // Filter for Lookbook: Explicitly saved OR legacy items (undefined isSaved)
+        const savedOnly = mappedLooks.filter((l: TryOnResult) => l.isSaved !== false);
+        setSavedItems(savedOnly);
+      }
     } catch (e) {
       toast.error("Cloud Sync Failed: Could not load your profile data.");
     }
@@ -190,23 +199,41 @@ function App() {
     }
   };
 
-  const handleNewTryOn = (result: TryOnResult) => {
-    const taggedResult = { ...result, userPhotoId: userPhoto?.id };
+  const handleNewTryOn = async (result: TryOnResult) => {
+    // Default to isSaved: false for new generations (Draft status)
+    const taggedResult = { ...result, userPhotoId: userPhoto?.id, isSaved: false };
     setGeneratedLooks(prev => [taggedResult, ...prev]);
     toast.success("New Look Generated", { description: `${result.product.name} equipped.` });
+
+    // Auto-persist to Supabase for logged-in users (as Draft)
+    if (currentUser && supabase) {
+      try {
+        await supabase.from('generated_looks').insert({
+          id: taggedResult.id,
+          user_id: currentUser.id,
+          result_json: taggedResult
+        });
+      } catch (e) {
+        console.error("Failed to auto-save generated look:", e);
+      }
+    }
   };
 
   const handleSaveItem = async (item: TryOnResult) => {
     if (!savedItems.find(i => i.id === item.id)) {
-      setSavedItems(prev => [item, ...prev]);
+      const savedItem = { ...item, isSaved: true };
+
+      // Update local state
+      setSavedItems(prev => [savedItem, ...prev]);
+      setGeneratedLooks(prev => prev.map(l => l.id === item.id ? savedItem : l));
+
       toast.success("Saved to Lookbook");
 
+      // Update DB to mark as saved
       if (currentUser && supabase) {
-        await supabase.from('generated_looks').insert({
-          id: item.id,
-          user_id: currentUser.id,
-          result_json: item
-        });
+        await supabase.from('generated_looks')
+          .update({ result_json: savedItem })
+          .eq('id', item.id);
       }
     } else {
       toast.info("Item already in Lookbook.");
@@ -219,15 +246,17 @@ function App() {
     setGeneratedLooks(prev => prev.map(l => l.id === lookId ? { ...l, ...updates } : l));
     setSavedItems(prev => prev.map(l => l.id === lookId ? { ...l, ...updates } : l));
 
-    // 2. Persist if it is a saved item
-    const isSaved = savedItems.some(l => l.id === lookId);
+    // 2. Persist to DB (for both Drafts and Saved items)
+    if (currentUser && supabase) {
+      // Find the most up-to-date object from our state (either list works as they are synced)
+      // We need the Full Object to update the JSON column
+      const currentList = generatedLooks.length > 0 ? generatedLooks : savedItems;
+      const existingItem = currentList.find(l => l.id === lookId);
 
-    if (isSaved && currentUser && supabase) {
-      const originalLook = savedItems.find(l => l.id === lookId);
-      if (originalLook) {
-        const updatedLook = { ...originalLook, ...updates };
+      if (existingItem) {
+        const updatedItem = { ...existingItem, ...updates };
         await supabase.from('generated_looks')
-          .update({ result_json: updatedLook })
+          .update({ result_json: updatedItem })
           .eq('id', lookId);
       }
     }
@@ -262,7 +291,8 @@ function App() {
 
   const handleRemoveLook = async (id: string) => {
     setSavedItems(prev => prev.filter(i => i.id !== id));
-    toast.success("Removed from Lookbook");
+    setGeneratedLooks(prev => prev.filter(i => i.id !== id)); // Sync deletion from Gallery too
+    toast.success("Deleted from History");
     if (currentUser && supabase) {
       await supabase.from('generated_looks').delete().eq('id', id);
     }
@@ -581,10 +611,20 @@ function App() {
           hasPhoto={userPhotos.length > 0}
           isGuest={authSession === 'guest'}
           onLogout={handleLogout}
+          onOpenSettings={() => setShowSettings(true)}
+          userAvatar={currentUser?.user_metadata?.avatar_url}
+          userName={currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0]}
         />
       </div>
       <main className="flex-1 relative z-10">{renderContent()}</main>
       <WaitlistModal isOpen={isWaitlistOpen} onClose={() => setIsWaitlistOpen(false)} />
+      {showSettings && currentUser && (
+        <ProfileSettings
+          user={currentUser}
+          onClose={() => setShowSettings(false)}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 }

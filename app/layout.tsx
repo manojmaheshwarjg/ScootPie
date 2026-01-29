@@ -77,9 +77,9 @@ export const metadata: Metadata = {
     },
   },
   icons: {
-    icon: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
-    shortcut: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
-    apple: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg',
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+    apple: '/favicon.svg',
   },
   manifest: '/manifest.json',
   verification: {

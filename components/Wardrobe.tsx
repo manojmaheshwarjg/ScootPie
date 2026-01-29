@@ -97,8 +97,8 @@ export const Wardrobe: React.FC<WardrobeProps> = ({
 
             {/* Hero Header */}
             <div className="relative z-10 border-b border-white/10 grid grid-cols-1 lg:grid-cols-3 bg-black/40 backdrop-blur-md">
-                <div className="col-span-2 p-8 lg:p-12 lg:border-r border-white/10">
-                    <h2 className="text-5xl lg:text-6xl font-serif text-white leading-[0.9] drop-shadow-xl mb-4">
+                <div className="col-span-2 p-6 md:p-8 lg:p-12 lg:border-r border-white/10">
+                    <h2 className="text-3xl md:text-5xl lg:text-6xl font-serif text-white leading-[0.9] drop-shadow-xl mb-4">
                         Digital <span className="italic text-accent">Inventory</span>
                     </h2>
                     <div className="flex gap-4">
@@ -117,12 +117,12 @@ export const Wardrobe: React.FC<WardrobeProps> = ({
                     </div>
                 </div>
 
-                <div className="bg-zinc-900/30 backdrop-blur-sm p-8 flex flex-col justify-center border-t lg:border-t-0 border-white/10 relative overflow-hidden">
+                <div className="bg-zinc-900/30 backdrop-blur-sm p-4 md:p-8 flex flex-col justify-center border-t lg:border-t-0 border-white/10 relative overflow-hidden">
                     {activeTab === 'CLOSET' && (
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isAnalyzing}
-                            className="w-full h-full border-2 border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center hover:bg-white/5 hover:border-accent/50 transition-all group overflow-hidden relative"
+                            className="w-full h-full min-h-[100px] py-6 border-2 border-dashed border-white/20 rounded-lg flex flex-col items-center justify-center hover:bg-white/5 hover:border-accent/50 transition-all group overflow-hidden relative"
                         >
                             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
                             {isAnalyzing && analysisPreview ? (
@@ -152,11 +152,11 @@ export const Wardrobe: React.FC<WardrobeProps> = ({
                 </div>
             </div>
 
-            <div className="flex-1 relative z-10 bg-white/5 min-h-[50vh] pb-24">
+            <div className="flex-1 relative z-10 bg-white/5 min-h-[30vh] md:min-h-[50vh] pb-24">
                 {activeTab === 'CLOSET' ? (
                     // CLOSET GRID
                     closetItems.length === 0 ? (
-                        <div className="p-20 text-center">
+                        <div className="p-8 md:p-20 text-center">
                             <p className="font-mono text-sm text-gray-500 uppercase tracking-widest">Your closet is empty.</p>
                             <p className="text-gray-600 mt-2 font-serif italic">Upload your clothes to mix them with new finds.</p>
                         </div>

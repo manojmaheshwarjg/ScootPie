@@ -32,6 +32,7 @@ export interface TryOnResult {
   timestamp: number;
   videoUrl?: string; // URL for Veo generated video
   videoStatus?: 'idle' | 'generating' | 'complete' | 'error';
+  isSaved?: boolean; // Track if explicitly saved to Lookbook
 }
 
 export interface ChatMessage {
@@ -66,26 +67,26 @@ export enum AppView {
 
 // Types for "Steal the Look" feature
 export interface TierProduct {
-    name: string;
-    brand: string;
-    price: string;
-    description?: string;
+  name: string;
+  brand: string;
+  price: string;
+  description?: string;
 }
 
 export interface InspirationItem {
-    category: string;
-    luxury: TierProduct;
-    mid: TierProduct;
-    budget: TierProduct;
+  category: string;
+  luxury: TierProduct;
+  mid: TierProduct;
+  budget: TierProduct;
 }
 
 export interface InspirationAnalysis {
-    totalCost: {
-        luxury: string;
-        mid: string;
-        budget: string;
-    };
-    items: InspirationItem[];
+  totalCost: {
+    luxury: string;
+    mid: string;
+    budget: string;
+  };
+  items: InspirationItem[];
 }
 
 
