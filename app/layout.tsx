@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from 'sonner';
 import { Inter, Playfair_Display, Space_Mono } from 'next/font/google';
 
+
 const inter = Inter({
   subsets: ['latin'],
   weight: ['300', '400', '500'],
@@ -149,21 +150,21 @@ export default function RootLayout({
         />
         {children}
         <Toaster
-            position="top-center"
-            theme="dark"
-            richColors
-            toastOptions={{
-                style: {
-                    background: 'rgba(20, 20, 20, 0.8)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    color: '#fff',
-                    fontFamily: 'var(--font-space-mono), Space Mono, monospace',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                }
-            }}
+          position="top-center"
+          theme="dark"
+          richColors
+          toastOptions={{
+            style: {
+              background: 'rgba(20, 20, 20, 0.8)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#fff',
+              fontFamily: 'var(--font-space-mono), Space Mono, monospace',
+              fontSize: '12px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }
+          }}
         />
       </body>
     </html>
