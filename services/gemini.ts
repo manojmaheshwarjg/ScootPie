@@ -11,18 +11,25 @@ const SEARCHAPI_API_KEY = process.env.SEARCHAPI_API_KEY || "";
 
 // --- IMAGE UTILITIES ---
 
+/**
+ * Fetch image from URL and convert to base64
+ * Supports both HTTP URLs and data URLs
+ */
 const imageUrlToBase64 = async (url: string): Promise<string | null> => {
   try {
     if (url.startsWith('data:')) return url;
 
     // Direct fetch with timeout
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      logger.error(`Failed to fetch image: ${response.status}`, null, { url });
+      return null;
+    }
 
     const contentType = response.headers.get('content-type');
     const arrayBuffer = await response.arrayBuffer();
@@ -35,19 +42,38 @@ const imageUrlToBase64 = async (url: string): Promise<string | null> => {
   }
 };
 
+/**
+ * Get base64 from either URL or existing base64 string
+ * This allows API routes to accept both formats for backward compatibility
+ */
+const resolveImageInput = async (imageUrl?: string, base64Image?: string): Promise<string | null> => {
+  if (imageUrl) {
+    return await imageUrlToBase64(imageUrl);
+  }
+  if (base64Image) {
+    return base64Image;
+  }
+  return null;
+};
+
 // --------------------------------------------------------
 
-export const enhanceUserPhoto = async (base64Image: string): Promise<string | null> => {
+export const enhanceUserPhoto = async (imageUrl?: string, base64Image?: string): Promise<string | null> => {
   try {
     await rateLimit('enhanceUserPhoto', { windowMs: 60000, maxRequests: 5 });
 
     const ai = getAI();
-    // Validate simple size check
-    if (base64Image.length > 10 * 1024 * 1024) throw new Error("Image payload too large");
 
-    const base64Parts = base64Image.split(',');
+    // Resolve image from URL or base64
+    const imageData = await resolveImageInput(imageUrl, base64Image);
+    if (!imageData) {
+      logger.error("No image provided for enhancement");
+      return null;
+    }
+
+    const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeMatch = base64Image.match(/^data:(image\/\w+);base64,/);
+    const mimeMatch = imageData.match(/^data:(image\/\w+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
     const prompt = `Task: Full-Body Fashion Studio Shot. Preserve Face Identity. Output: High resolution, full body visible. Safety: No nudity.`;
@@ -266,20 +292,26 @@ export const searchProducts = async (query: string, gender?: string): Promise<Pr
   }
 };
 
-export const generateTryOnImage = async (userPhotoBase64: string, products: Product[]): Promise<string | null> => {
+export const generateTryOnImage = async (userPhotoUrl?: string, userPhotoBase64?: string, products?: Product[]): Promise<string | null> => {
   try {
     await rateLimit('generateTryOnImage', { windowMs: 60000, maxRequests: 5 });
     const ai = getAI();
-    if (userPhotoBase64.length > 8 * 1024 * 1024) throw new Error("Input image too large");
 
-    const base64Parts = userPhotoBase64.split(',');
+    // Resolve image from URL or base64
+    const userImageData = await resolveImageInput(userPhotoUrl, userPhotoBase64);
+    if (!userImageData) {
+      logger.error("No user photo provided for try-on");
+      return null;
+    }
+
+    const base64Parts = userImageData.split(',');
     const cleanUserBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const userMimeMatch = userPhotoBase64.match(/^data:(image\/\w+);base64,/);
+    const userMimeMatch = userImageData.match(/^data:(image\/\w+);base64,/);
     const userMimeType = userMimeMatch ? userMimeMatch[1] : 'image/jpeg';
 
     const referenceParts = [];
     const textDescriptions = [];
-    for (const [i, p] of products.entries()) {
+    for (const [i, p] of (products || []).entries()) {
       textDescriptions.push(`ITEM ${i + 1}: ${sanitizeInput(p.brand)} ${sanitizeInput(p.name)}`);
       if (p.imageUrl) {
         const productBase64 = await imageUrlToBase64(p.imageUrl);
@@ -318,14 +350,22 @@ export const generateTryOnImage = async (userPhotoBase64: string, products: Prod
 
 // --- VIDEO GENERATION SPLIT (START -> POLL) ---
 
-export const startRunwayVideo = async (imageBase64: string): Promise<string | null> => {
+export const startRunwayVideo = async (imageUrl?: string, imageBase64?: string): Promise<string | null> => {
   try {
     await rateLimit('startRunwayVideo', { windowMs: 60000, maxRequests: 1 });
 
     const ai = getAI();
-    const base64Parts = imageBase64.split(',');
+
+    // Resolve image from URL or base64
+    const imageData = await resolveImageInput(imageUrl, imageBase64);
+    if (!imageData) {
+      logger.error("No image provided for video");
+      return null;
+    }
+
+    const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeMatch = imageBase64.match(/^data:(image\/\w+);base64,/);
+    const mimeMatch = imageData.match(/^data:(image\/\w+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
     const operation = await ai.models.generateVideos({
@@ -385,13 +425,21 @@ export const generateRunwayVideo = async (imageBase64: string): Promise<string |
   return null;
 };
 
-export const generate360View = async (imageBase64: string): Promise<string | null> => {
+export const generate360View = async (imageUrl?: string, imageBase64?: string): Promise<string | null> => {
   try {
     await rateLimit('generate360View', { windowMs: 60000, maxRequests: 1 });
     const ai = getAI();
-    const base64Parts = imageBase64.split(',');
+
+    // Resolve image from URL or base64
+    const imageData = await resolveImageInput(imageUrl, imageBase64);
+    if (!imageData) {
+      logger.error("No image provided for 360 view");
+      return null;
+    }
+
+    const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeType = imageBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+    const mimeType = imageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
 
     let operation = await ai.models.generateVideos({
       model: 'veo-3.1-generate-preview',
@@ -427,13 +475,21 @@ export const generate360View = async (imageBase64: string): Promise<string | nul
   }
 };
 
-export const analyzeClosetItem = async (base64Image: string): Promise<Partial<Product> | null> => {
+export const analyzeClosetItem = async (imageUrl?: string, base64Image?: string): Promise<Partial<Product> | null> => {
   try {
     await rateLimit('analyzeClosetItem', { windowMs: 60000, maxRequests: 10 });
     const ai = getAI();
-    const base64Parts = base64Image.split(',');
+
+    // Resolve image from URL or base64
+    const imageData = await resolveImageInput(imageUrl, base64Image);
+    if (!imageData) {
+      logger.error("No image provided for closet item analysis");
+      return null;
+    }
+
+    const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+    const mimeType = imageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
     const prompt = `Analyze clothing. Return JSON: { category, name, brand, color }. Categories: top, bottom, shoes, outerwear, one-piece, accessory.`;
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -447,13 +503,21 @@ export const analyzeClosetItem = async (base64Image: string): Promise<Partial<Pr
   } catch (e) { return null; }
 }
 
-export const analyzeInspirationImage = async (base64Image: string): Promise<InspirationAnalysis | null> => {
+export const analyzeInspirationImage = async (imageUrl?: string, base64Image?: string): Promise<InspirationAnalysis | null> => {
   try {
     await rateLimit('analyzeInspirationImage', { windowMs: 60000, maxRequests: 5 });
     const ai = getAI();
-    const base64Parts = base64Image.split(',');
+
+    // Resolve image from URL or base64
+    const imageData = await resolveImageInput(imageUrl, base64Image);
+    if (!imageData) {
+      logger.error("No image provided for inspiration analysis");
+      return null;
+    }
+
+    const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+    const mimeType = imageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
     const prompt = `Analyze outfit. Suggest 3 tiers (Luxury, Mid, Budget). Return JSON: { totalCost: {luxury, mid, budget}, items: [{category, luxury: {name, brand, price}, mid: {...}, budget: {...}}] }`;
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -464,14 +528,30 @@ export const analyzeInspirationImage = async (base64Image: string): Promise<Insp
   } catch (e) { return null; }
 }
 
-export const generateStealTheLook = async (userPhoto: string, inspirationPhoto: string, mode: 'full' | 'top' | 'bottom' = 'full'): Promise<string | null> => {
+export const generateStealTheLook = async (
+  userPhotoUrl?: string,
+  inspirationPhotoUrl?: string,
+  mode: 'full' | 'top' | 'bottom' = 'full',
+  userPhotoBase64?: string,
+  inspirationPhotoBase64?: string
+): Promise<string | null> => {
   try {
     await rateLimit('generateStealTheLook', { windowMs: 60000, maxRequests: 3 });
     const ai = getAI();
-    const userClean = userPhoto.split(',')[1];
-    const userMime = userPhoto.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
-    const inspoClean = inspirationPhoto.split(',')[1];
-    const inspoMime = inspirationPhoto.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+
+    // Resolve images from URLs or base64
+    const userImageData = await resolveImageInput(userPhotoUrl, userPhotoBase64);
+    const inspirationImageData = await resolveImageInput(inspirationPhotoUrl, inspirationPhotoBase64);
+
+    if (!userImageData || !inspirationImageData) {
+      logger.error("Missing images for steal the look");
+      return null;
+    }
+
+    const userClean = userImageData.split(',')[1];
+    const userMime = userImageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+    const inspoClean = inspirationImageData.split(',')[1];
+    const inspoMime = inspirationImageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
     const instructions = mode === 'full' ? "TRANSFER COMPLETE OUTFIT." : mode === 'top' ? "TRANSFER UPPER BODY ONLY." : "TRANSFER LOWER BODY ONLY.";
     const prompt = `Style Transfer. ${instructions} Preserve Face/Body Identity. Safety: No nudity.`;
     const response = await ai.models.generateContent({

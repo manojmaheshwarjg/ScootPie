@@ -3,16 +3,16 @@ import { analyzeClosetItem } from '@/services/gemini';
 
 export async function POST(request: Request) {
     try {
-        const { base64Image } = await request.json();
+        const { imageUrl, base64Image } = await request.json();
 
-        if (!base64Image) {
+        if (!imageUrl && !base64Image) {
             return NextResponse.json(
-                { error: 'base64Image is required' },
+                { error: 'imageUrl or base64Image is required' },
                 { status: 400 }
             );
         }
 
-        const result = await analyzeClosetItem(base64Image);
+        const result = await analyzeClosetItem(imageUrl, base64Image);
 
         return NextResponse.json({
             success: true,

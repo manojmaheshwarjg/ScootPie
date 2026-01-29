@@ -3,16 +3,30 @@ import { generateStealTheLook } from '@/services/gemini';
 
 export async function POST(request: Request) {
     try {
-        const { userPhoto, inspirationPhoto, mode } = await request.json();
+        const { userPhotoUrl, inspirationPhotoUrl, userPhoto, inspirationPhoto, mode } = await request.json();
 
-        if (!userPhoto || !inspirationPhoto) {
+        // Support both URL and base64 inputs for backward compatibility
+        if (!userPhotoUrl && !userPhoto) {
             return NextResponse.json(
-                { error: 'userPhoto and inspirationPhoto are required' },
+                { error: 'userPhotoUrl or userPhoto is required' },
                 { status: 400 }
             );
         }
 
-        const result = await generateStealTheLook(userPhoto, inspirationPhoto, mode || 'full');
+        if (!inspirationPhotoUrl && !inspirationPhoto) {
+            return NextResponse.json(
+                { error: 'inspirationPhotoUrl or inspirationPhoto is required' },
+                { status: 400 }
+            );
+        }
+
+        const result = await generateStealTheLook(
+            userPhotoUrl,
+            inspirationPhotoUrl,
+            mode || 'full',
+            userPhoto,
+            inspirationPhoto
+        );
 
         return NextResponse.json({
             success: true,

@@ -3,16 +3,23 @@ import { generateTryOnImage } from '@/services/gemini';
 
 export async function POST(request: Request) {
     try {
-        const { userPhotoBase64, products } = await request.json();
+        const { userPhotoUrl, userPhotoBase64, products } = await request.json();
 
-        if (!userPhotoBase64 || !products) {
+        if (!userPhotoUrl && !userPhotoBase64) {
             return NextResponse.json(
-                { error: 'userPhotoBase64 and products are required' },
+                { error: 'userPhotoUrl or userPhotoBase64 is required' },
                 { status: 400 }
             );
         }
 
-        const result = await generateTryOnImage(userPhotoBase64, products);
+        if (!products) {
+            return NextResponse.json(
+                { error: 'products are required' },
+                { status: 400 }
+            );
+        }
+
+        const result = await generateTryOnImage(userPhotoUrl, userPhotoBase64, products);
 
         return NextResponse.json({
             success: true,
