@@ -61,10 +61,9 @@ const resolveImageInput = async (imageUrl?: string, base64Image?: string): Promi
 export const enhanceUserPhoto = async (imageUrl?: string, base64Image?: string): Promise<string | null> => {
   try {
     await rateLimit('enhanceUserPhoto', { windowMs: 60000, maxRequests: 5 });
-
     const ai = getAI();
 
-    // Resolve image from URL or base64
+    // Resolve image
     const imageData = await resolveImageInput(imageUrl, base64Image);
     if (!imageData) {
       logger.error("No image provided for enhancement");
@@ -73,27 +72,25 @@ export const enhanceUserPhoto = async (imageUrl?: string, base64Image?: string):
 
     const base64Parts = imageData.split(',');
     const cleanBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const mimeMatch = imageData.match(/^data:(image\/\w+);base64,/);
-    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-
+    const mimeType = imageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
     const prompt = `Task: Full-Body Fashion Studio Shot. Preserve Face Identity. Output: High resolution, full body visible. Safety: No nudity.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType: mimeType, data: cleanBase64 } }
-        ]
-      },
-      config: {
-        imageConfig: { imageSize: '1K', aspectRatio: '3:4' }
-      }
+    // Use Interactions API for Gemini 3 Pro Image Preview
+    // @ts-ignore
+    const interaction = await (ai as any).interactions.create({
+      model: 'gemini-3-pro-image-preview',
+      input: [
+        { type: 'text', text: prompt },
+        { type: 'image', data: cleanBase64, mime_type: mimeType }
+      ],
+      response_modalities: ['image']
     });
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    if (interaction.outputs) {
+      for (const output of interaction.outputs) {
+        if (output.type === 'image' && output.data) {
+          return `data:${output.mime_type || 'image/png'};base64,${output.data}`;
+        }
       }
     }
     return null;
@@ -313,7 +310,6 @@ export const generateTryOnImage = async (userPhotoUrl?: string, userPhotoBase64?
     await rateLimit('generateTryOnImage', { windowMs: 60000, maxRequests: 5 });
     const ai = getAI();
 
-    // Resolve image from URL or base64
     const userImageData = await resolveImageInput(userPhotoUrl, userPhotoBase64);
     if (!userImageData) {
       logger.error("No user photo provided for try-on");
@@ -322,44 +318,47 @@ export const generateTryOnImage = async (userPhotoUrl?: string, userPhotoBase64?
 
     const base64Parts = userImageData.split(',');
     const cleanUserBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-    const userMimeMatch = userImageData.match(/^data:(image\/\w+);base64,/);
-    const userMimeType = userMimeMatch ? userMimeMatch[1] : 'image/jpeg';
+    const userMimeType = userImageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
 
-    const referenceParts = [];
-    const textDescriptions = [];
-    for (const [i, p] of (products || []).entries()) {
-      textDescriptions.push(`ITEM ${i + 1}: ${sanitizeInput(p.brand)} ${sanitizeInput(p.name)}`);
+    const textDescriptions = (products || []).map((p, i) => `ITEM ${i + 1}: ${sanitizeInput(p.brand)} ${sanitizeInput(p.name)}`);
+    const prompt = `Virtual Try-On. Preserve Face. Outfit: ${textDescriptions.join(', ')}. Safety: No nudity.`;
+
+    // Prepare interaction inputs
+    const inputs: any[] = [
+      { type: 'text', text: prompt },
+      { type: 'image', data: cleanUserBase64, mime_type: userMimeType }
+    ];
+
+    // Add product reference images
+    for (const p of (products || [])) {
       if (p.imageUrl) {
         const productBase64 = await imageUrlToBase64(p.imageUrl);
         if (productBase64) {
           const pClean = productBase64.split(',')[1];
           const pMime = productBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
-          referenceParts.push({ text: `REF ${i + 1}:` });
-          referenceParts.push({ inlineData: { mimeType: pMime, data: pClean } });
+          inputs.push({ type: 'text', text: `Garment Reference: ${p.name}` });
+          inputs.push({ type: 'image', data: pClean, mime_type: pMime });
         }
       }
     }
 
-    const prompt = `Virtual Try-On. Preserve Face. Outfit: ${textDescriptions.join(', ')}. Safety: No nudity.`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [{ text: prompt }, { inlineData: { mimeType: userMimeType, data: cleanUserBase64 } }, ...referenceParts]
-      },
-      config: {
-        tools: [{ googleSearch: {} }],
-        imageConfig: { imageSize: '1K', aspectRatio: '3:4' }
-      }
+    // @ts-ignore
+    const interaction = await (ai as any).interactions.create({
+      model: 'gemini-3-pro-image-preview',
+      input: inputs,
+      response_modalities: ['image']
     });
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    if (interaction.outputs) {
+      for (const output of interaction.outputs) {
+        if (output.type === 'image' && output.data) {
+          return `data:${output.mime_type || 'image/png'};base64,${output.data}`;
+        }
       }
     }
     return null;
   } catch (error) {
+    logger.error("Try-On Error", error);
     return null;
   }
 };
@@ -555,7 +554,7 @@ export const generateStealTheLook = async (
     await rateLimit('generateStealTheLook', { windowMs: 60000, maxRequests: 3 });
     const ai = getAI();
 
-    // Resolve images from URLs or base64
+    // Resolve images
     const userImageData = await resolveImageInput(userPhotoUrl, userPhotoBase64);
     const inspirationImageData = await resolveImageInput(inspirationPhotoUrl, inspirationPhotoBase64);
 
@@ -568,17 +567,28 @@ export const generateStealTheLook = async (
     const userMime = userImageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
     const inspoClean = inspirationImageData.split(',')[1];
     const inspoMime = inspirationImageData.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+
     const instructions = mode === 'full' ? "TRANSFER COMPLETE OUTFIT." : mode === 'top' ? "TRANSFER UPPER BODY ONLY." : "TRANSFER LOWER BODY ONLY.";
-    const prompt = `Style Transfer. ${instructions} Preserve Face/Body Identity. Safety: No nudity.`;
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [{ text: prompt }, { inlineData: { mimeType: userMime, data: userClean } }, { text: "STYLE REFERENCE:" }, { inlineData: { mimeType: inspoMime, data: inspoClean } }]
-      },
-      config: { imageConfig: { imageSize: '1K', aspectRatio: '3:4' } }
+    const prompt = `Style Transfer. ${instructions} Preserve Face/Body Identity. Match style of provided inspiration. Safety: No nudity.`;
+
+    // @ts-ignore
+    const interaction = await (ai as any).interactions.create({
+      model: 'gemini-3-pro-image-preview',
+      input: [
+        { type: 'text', text: prompt },
+        { type: 'image', data: userClean, mime_type: userMime },
+        { type: 'text', text: 'STYLE_REFERENCE' },
+        { type: 'image', data: inspoClean, mime_type: inspoMime }
+      ],
+      response_modalities: ['image']
     });
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+
+    if (interaction.outputs) {
+      for (const output of interaction.outputs) {
+        if (output.type === 'image' && output.data) {
+          return `data:${output.mime_type || 'image/png'};base64,${output.data}`;
+        }
+      }
     }
     return null;
   } catch (e) { return null; }
