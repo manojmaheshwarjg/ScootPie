@@ -79,7 +79,7 @@ export const enhanceUserPhoto = async (imageUrl?: string, base64Image?: string):
     const prompt = `Task: Full-Body Fashion Studio Shot. Preserve Face Identity. Output: High resolution, full body visible. Safety: No nudity.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { text: prompt },
@@ -120,7 +120,7 @@ export const chatWithStylist = async (
     }));
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: [
         ...sanitizedHistory,
         { role: 'user', parts: [{ text: `CONTEXT UPDATE:\n- CURRENTLY WEARING: ${sanitizeInput(outfitContext, 500)}\n- USER CLOSET INVENTORY:\n${sanitizeInput(closetInventory, 2000)}\n\nUSER REQUEST: ${safeMessage}` }] }
@@ -153,7 +153,7 @@ export const analyzeClosetFit = async (
     const specializedPrompt = `SPECIALIZED STYLING SESSION. Items: ${itemsList}. Task: Provide ||CLOSET_LOOK|| and ||HYBRID_LOOK||.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: [
         ...history.map(h => ({ role: h.role === 'model' ? 'model' : 'user', parts: h.parts })),
         { role: 'user', parts: [{ text: specializedPrompt }] }
@@ -173,12 +173,24 @@ export const analyzeClosetFit = async (
   }
 }
 
+// Helper: Infer product category from title using keyword matching
+const inferCategory = (title: string): ProductCategory => {
+  const t = title.toLowerCase();
+  if (/\b(shirt|blouse|top|tee|t-shirt|sweater|hoodie|cardigan|polo|tank)\b/.test(t)) return 'top';
+  if (/\b(pants|jeans|trousers|shorts|skirt|leggings)\b/.test(t)) return 'bottom';
+  if (/\b(dress|jumpsuit|romper|gown)\b/.test(t)) return 'one-piece';
+  if (/\b(jacket|coat|blazer|parka|vest|windbreaker)\b/.test(t)) return 'outerwear';
+  if (/\b(shoes|sneakers|boots|heels|sandals|loafers|flats|oxfords)\b/.test(t)) return 'shoes';
+  if (/\b(bag|hat|belt|scarf|watch|jewelry|sunglasses|necklace|bracelet|earring)\b/.test(t)) return 'accessory';
+  return 'top'; // default
+};
+
 export const searchProducts = async (query: string, gender?: string): Promise<Product[]> => {
   try {
     await rateLimit('searchProducts', { windowMs: 60000, maxRequests: 30 });
 
     const safeQuery = sanitizeInput(query, 100);
-    const fullQuery = `${safeQuery} ${gender || ''}`;
+    const fullQuery = `${safeQuery} ${gender || ''}`.trim();
     const cacheKey = `search:${fullQuery.toLowerCase().replace(/\s+/g, '-')}`;
 
     // 1. SCALABILITY: Check Cache First
@@ -194,17 +206,20 @@ export const searchProducts = async (query: string, gender?: string): Promise<Pr
       }
     }
 
-    const ai = getAI();
     const apiKey = SEARCHAPI_API_KEY;
     const prohibitedTerms = ['nude', 'naked', 'bikini', 'swimwear', 'swimsuit', 'lingerie', 'underwear', 'nsfw'];
 
     if (prohibitedTerms.some(term => safeQuery.toLowerCase().includes(term))) return [];
 
-    let searchResults: any[] = [];
+    let products: Product[] = [];
     let isFallback = false;
 
+    // Try SearchAPI with timeout
     if (apiKey) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
         const params = new URLSearchParams({
           engine: "google_shopping",
           q: fullQuery,
@@ -213,58 +228,56 @@ export const searchProducts = async (query: string, gender?: string): Promise<Pr
           gl: "us",
           hl: "en",
         });
-        const res = await fetch(`https://www.searchapi.io/api/v1/search?${params.toString()}`);
+
+        const res = await fetch(`https://www.searchapi.io/api/v1/search?${params.toString()}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+
         if (res.ok) {
           const data = await res.json();
           if (data.shopping_results?.length > 0) {
-            searchResults = data.shopping_results.map((item: any, idx: number) => ({
-              _id: idx,
-              title: item.title,
-              source: item.source || item.seller,
-              price: item.price,
-              link: item.product_link || item.link,
-              thumbnail: item.thumbnail,
-              snippet: item.snippet || item.title
+            // OPTIMIZATION: Direct mapping without LLM call
+            products = data.shopping_results.slice(0, 6).map((item: any, idx: number) => ({
+              id: `sp-${Date.now()}-${idx}`,
+              name: item.title,
+              brand: item.source || item.seller || 'Unknown',
+              price: item.price || 'Check price',
+              category: inferCategory(item.title),
+              description: item.snippet || item.title,
+              url: item.product_link || item.link,
+              imageUrl: item.thumbnail,
+              source: 'search' as const
             }));
-          } else isFallback = true;
-        } else isFallback = true;
-      } catch (e) { isFallback = true; }
-    } else isFallback = true;
-
-    let prompt = "";
-    if (!isFallback && searchResults.length > 0) {
-      const llmInput = searchResults.map(s => ({ id: s._id, title: s.title, source: s.source, price: s.price }));
-      prompt = `Extract fashion data from results: ${JSON.stringify(llmInput)}. Return JSON array.`;
+          } else {
+            isFallback = true;
+          }
+        } else {
+          isFallback = true;
+        }
+      } catch (e) {
+        // Timeout or network error
+        logger.warn("SearchAPI timeout or error, falling back to LLM", { error: e });
+        isFallback = true;
+      }
     } else {
-      prompt = `Generate 3 fashion items for query: "${fullQuery}". Return JSON array.`;
+      isFallback = true;
     }
 
-    const extractionResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' }
-    });
+    // FALLBACK: Only use LLM when no real search results
+    if (isFallback) {
+      try {
+        const ai = getAI();
+        const prompt = `Generate 3 realistic fashion product suggestions for query: "${fullQuery}". Return JSON array with fields: name, brand, price (string like "$99"), category (top/bottom/shoes/outerwear/one-piece/accessory), searchTerm.`;
 
-    let products: Product[] = [];
-    try {
-      const structuredData = JSON.parse(extractionResponse.text);
-      if (!isFallback && searchResults.length > 0) {
-        products = structuredData.map((item: any) => {
-          const original = searchResults.find(s => s._id === item.index) || searchResults[0];
-          return {
-            id: `sp-${Date.now()}-${Math.random()}`,
-            name: item.name,
-            brand: item.brand || original.source,
-            price: item.price,
-            category: item.category || 'top',
-            description: item.description || original.snippet,
-            url: original.link,
-            imageUrl: original.thumbnail,
-            source: 'search'
-          } as Product;
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
         });
-      } else {
-        products = structuredData.map((item: any, idx: number) => ({
+
+        const generatedData = JSON.parse(response.text);
+        products = generatedData.map((item: any, idx: number) => ({
           id: `gen-${Date.now()}-${idx}`,
           name: item.name,
           brand: item.brand,
@@ -273,10 +286,13 @@ export const searchProducts = async (query: string, gender?: string): Promise<Pr
           description: `${item.brand} ${item.name}`,
           url: `https://www.google.com/search?q=${encodeURIComponent(item.searchTerm || item.name)}&tbm=shop`,
           imageUrl: undefined,
-          source: 'generated'
+          source: 'generated' as const
         }));
+      } catch (e) {
+        logger.error("LLM fallback failed", e);
+        return [];
       }
-    } catch (e) { return []; }
+    }
 
     // 2. SCALABILITY: Set Cache (1 Hour)
     if (redis && products.length > 0) {
@@ -327,7 +343,7 @@ export const generateTryOnImage = async (userPhotoUrl?: string, userPhotoBase64?
     const prompt = `Virtual Try-On. Preserve Face. Outfit: ${textDescriptions.join(', ')}. Safety: No nudity.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [{ text: prompt }, { inlineData: { mimeType: userMimeType, data: cleanUserBase64 } }, ...referenceParts]
       },
@@ -555,7 +571,7 @@ export const generateStealTheLook = async (
     const instructions = mode === 'full' ? "TRANSFER COMPLETE OUTFIT." : mode === 'top' ? "TRANSFER UPPER BODY ONLY." : "TRANSFER LOWER BODY ONLY.";
     const prompt = `Style Transfer. ${instructions} Preserve Face/Body Identity. Safety: No nudity.`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [{ text: prompt }, { inlineData: { mimeType: userMime, data: userClean } }, { text: "STYLE REFERENCE:" }, { inlineData: { mimeType: inspoMime, data: inspoClean } }]
       },
@@ -569,7 +585,18 @@ export const generateStealTheLook = async (
 }
 
 export const getDiscoverQueue = async (gender?: string): Promise<Product[]> => {
-  const styles = ["trending streetwear", "avant garde", "minimalist luxury", "techwear", "vintage 90s"];
+  const styles = [
+    "trending streetwear outfit",
+    "avant garde fashion clothing",
+    "minimalist luxury apparel",
+    "techwear clothing",
+    "vintage 90s fashion items"
+  ];
   const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-  return await searchProducts(randomStyle, gender);
+
+  // Construct a more specific query to avoid perfumes, makeup, etc.
+  const genderTerm = gender ? `${gender}'s` : '';
+  const query = `${genderTerm} ${randomStyle} -perfume -fragrance -cologne -makeup -cosmetics`;
+
+  return await searchProducts(query, gender);
 }

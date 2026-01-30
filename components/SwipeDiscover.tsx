@@ -28,6 +28,8 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
     // UI Feedback state
     const [feedback, setFeedback] = useState<'LIKE' | 'NOPE' | null>(null);
 
+    const [swipeCount, setSwipeCount] = useState(0);
+
     // Initial Load
     useEffect(() => {
         loadMoreItems();
@@ -35,7 +37,14 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
 
     const loadMoreItems = async () => {
         setIsLoading(true);
-        const newItems = await getDiscoverQueue(userGender);
+        // Fetch 2 batches to get close to 10 items
+        const [batch1, batch2] = await Promise.all([
+            getDiscoverQueue(userGender),
+            getDiscoverQueue(userGender)
+        ]);
+
+        const newItems = [...batch1, ...batch2];
+
         // Filter out items already in queue to avoid key conflicts
         setQueue(prev => {
             const existingIds = new Set(prev.map(p => p.id));
@@ -45,12 +54,22 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
         setIsLoading(false);
     };
 
-    // Auto-refill queue when getting low
+    // Auto-refill queue:
+    // 1. When running low (standard buffer)
+    // 2. BACKGROUND STRATEGY: Fetch next batch after every 5 swipes
     useEffect(() => {
         if (queue.length > 0 && currentIndex >= queue.length - 3 && !isLoading) {
             loadMoreItems();
         }
     }, [currentIndex, queue.length, isLoading]);
+
+    // Track swipes for background pre-fetching
+    useEffect(() => {
+        if (swipeCount > 0 && swipeCount % 5 === 0) {
+            console.log("[Discover] Background fetching next batch...");
+            loadMoreItems();
+        }
+    }, [swipeCount]);
 
     // --- REAL-TIME GENERATION TRIGGER ---
     useEffect(() => {
@@ -58,25 +77,25 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
             if (!userPhoto || queue.length === 0) return;
 
             const currentItem = queue[currentIndex];
-            if (!currentItem) return;
+            // Also try to pre-generate the next item if possible (look-ahead)
+            const nextItem = queue[currentIndex + 1];
 
-            // If we already have it or are generating it, skip
-            if (generatedCache[currentItem.id] || generatingId === currentItem.id) return;
-
-            setGeneratingId(currentItem.id);
-            console.log(`[Discover] Generating try-on for card: ${currentItem.name}`);
-
-            try {
-                // Generate Try-On for the current card
-                const img = await generateTryOnImage(userPhoto, [currentItem]);
-                if (img) {
-                    setGeneratedCache(prev => ({ ...prev, [currentItem.id]: img }));
+            // Primary: Generate current item
+            if (currentItem && !generatedCache[currentItem.id] && generatingId !== currentItem.id) {
+                setGeneratingId(currentItem.id);
+                try {
+                    const img = await generateTryOnImage(userPhoto, [currentItem]);
+                    if (img) setGeneratedCache(prev => ({ ...prev, [currentItem.id]: img }));
+                } catch (e) {
+                    console.error("Card Generation Error", e);
+                } finally {
+                    setGeneratingId(null);
                 }
-            } catch (e) {
-                console.error("Card Generation Error", e);
-            } finally {
-                setGeneratingId(null);
             }
+
+            // Secondary: Pre-generate next item (Lower priority, check if we're not already engaging the API)
+            // Note: We have strict rate limits (5/min), so be conservative. Only do this if we haven't generated recently.
+            // For now, simpler to just let the user swipe and trigger on-demand to avoid hitting limits.
         };
 
         const timeout = setTimeout(triggerGeneration, 500); // Small delay to allow swipe animation to settle
@@ -136,8 +155,9 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
                     onMatch(item, generatedCache[item.id]);
                 }
             }
-            // Advance queue
+            // Advance queue & count
             setCurrentIndex(prev => prev + 1);
+            setSwipeCount(prev => prev + 1);
 
             // Reset state for next card
             setDragDelta({ x: 0, y: 0 });
@@ -228,14 +248,19 @@ export const SwipeDiscover: React.FC<SwipeDiscoverProps> = ({ userPhoto, userGen
     const renderSkeletonStack = () => {
         return (
             <>
-                <div className="absolute inset-0 bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden z-30 animate-pulse">
-                    <div className="w-full h-3/4 bg-zinc-800/50" />
-                    <div className="p-6 space-y-3">
-                        <div className="h-6 w-2/3 bg-zinc-800 rounded" />
-                        <div className="h-4 w-1/3 bg-zinc-800 rounded" />
+                <div className="absolute inset-0 bg-zinc-900 border border-white/10 rounded-3xl overflow-hidden z-30 animate-pulse flex flex-col items-center justify-center text-center p-6">
+                    <div className="w-full h-3/4 bg-zinc-800/50 absolute top-0" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                        <Loader2 className="w-12 h-12 text-accent animate-spin mb-4" />
+                        <h3 className="font-serif text-xl text-white mb-2">Curating Feed</h3>
+                        <p className="font-mono text-[10px] text-gray-400 uppercase tracking-widest max-w-[200px]">
+                            Finding {userGender ? `${userGender}'s` : ''} fits...
+                            <br />This may take a moment.
+                        </p>
                     </div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                        <Loader2 className="w-8 h-8 text-white/20 animate-spin" />
+                    <div className="absolute bottom-6 w-full px-6 space-y-3">
+                        <div className="h-6 w-2/3 bg-zinc-800 rounded mx-auto" />
+                        <div className="h-4 w-1/3 bg-zinc-800 rounded mx-auto" />
                     </div>
                 </div>
             </>
