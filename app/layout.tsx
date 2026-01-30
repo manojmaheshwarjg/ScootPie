@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from 'sonner';
 import { Inter, Playfair_Display, Space_Mono } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
 
 
 const inter = Inter({
@@ -166,6 +167,7 @@ export default function RootLayout({
             }
           }}
         />
+        <Analytics />
       </body>
     </html>
   );
