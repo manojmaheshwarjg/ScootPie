@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="https://upload.wikimedia.org/wikipedia/commons/4/4e/Gemini_logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScootPie - AI Virtual Stylist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              black: '#000000',
+              white: '#ffffff',
+              accent: '#f97316', // Orange from the reference 'F' logo
+              gray: {
+                50: '#f9fafb',
+                100: '#f3f4f6',
+                200: '#e5e7eb',
+                300: '#d1d5db',
+                400: '#9ca3af',
+                500: '#6b7280',
+                600: '#4b5563',
+                800: '#1f2937',
+                900: '#111827',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              serif: ['Playfair Display', 'serif'],
+              mono: ['Space Mono', 'monospace'],
+            },
+            borderWidth: {
+              '1': '1px',
+            },
+            animation: {
+              'infinite-scroll': 'infinite-scroll 40s linear infinite',
+              'scan': 'scan 3s ease-in-out infinite',
+              'blink': 'blink 1s step-end infinite',
+              'spin-slow': 'spin 8s linear infinite',
+            },
+            keyframes: {
+              'infinite-scroll': {
+                from: { transform: 'translateX(0)' },
+                to: { transform: 'translateX(-100%)' },
+              },
+              'scan': {
+                '0%, 100%': { top: '0%' },
+                '50%': { top: '100%' },
+              },
+              'blink': {
+                '0%, 100%': { opacity: '1' },
+                '50%': { opacity: '0' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+
+      body {
+        background-color: #000000;
+        color: #ffffff;
+        font-family: 'Inter', sans-serif;
+        overflow-x: hidden;
+      }
+      
+      h1, h2, h3, h4, h5, h6 {
+        font-family: 'Playfair Display', serif;
+      }
+
+      .font-mono {
+        font-family: 'Space Mono', monospace;
+      }
+
+      /* Custom scrollbar - Global Hide */
+      ::-webkit-scrollbar {
+        width: 0px;
+        height: 0px; /* Crucial for horizontal scrollbars */
+        background: transparent;
+      }
+      
+      * {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+      }
+      
+      /* Manual fallback if tailwind config issue */
+      @keyframes infinite-scroll {
+        from { transform: translateX(0); }
+        to { transform: translateX(-100%); }
+      }
+      .animate-infinite-scroll {
+        animation: infinite-scroll 40s linear infinite;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+    "lucide-react": "https://esm.sh/lucide-react@0.469.0?external=react",
+    "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
+    "react-markdown": "https://esm.sh/react-markdown@9.0.1?external=react",
+    "three": "https://esm.sh/three@0.172.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.17.12?external=react,react-dom,three",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@9.121.3?external=react,react-dom,three,@react-three/fiber",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.91.1",
+    "next": "https://esm.sh/next@^16.1.4",
+    "sonner": "https://esm.sh/sonner@^2.0.7",
+    "buffer": "https://esm.sh/buffer@^6.0.3",
+    "next/": "https://esm.sh/next@^16.1.4/",
+    "@upstash/redis": "https://esm.sh/@upstash/redis@^1.36.1",
+    "crypto": "https://esm.sh/crypto@^1.0.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

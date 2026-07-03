@@ -1,0 +1,7 @@
+{
+    "functions": {
+        "app/api/gemini/**/*.ts": {
+            "maxDuration": 60
+        }
+    }
+}

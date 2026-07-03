@@ -1,0 +1,8 @@
+{
+  "name": "ScootPie",
+  "description": "An AI-powered virtual try-on platform acting as your personal stylist. Upload your photo, chat with the AI to discover real products, and instantly visualize them on yourself.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
